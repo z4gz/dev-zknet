@@ -8,22 +8,12 @@ type NetworkInfo struct {
 	KpClientDebugPollingInterval        int     `yaml:"kp_client_debug_PollingInterval"`
 	KpClientDebugSessionDialTimeout     int     `yaml:"kp_client_debug_SessionDialTimeout"`
 	KpConfigKem                         string  `yaml:"kp_config_kem"`
-	KpConfigLambdaD                     float64 `yaml:"kp_config_LambdaD"`
-	KpConfigLambdaDMaxDelay             uint64  `yaml:"kp_config_LambdaDMaxDelay"`
-	KpConfigLambdaGMaxDelay             uint64  `yaml:"kp_config_LambdaGMaxDelay"`
 	KpConfigLambdaL                     float64 `yaml:"kp_config_LambdaL"`
-	KpConfigLambdaLMaxDelay             uint64  `yaml:"kp_config_LambdaLMaxDelay"`
 	KpConfigLambdaM                     float64 `yaml:"kp_config_LambdaM"`
-	KpConfigLambdaMMaxDelay             uint64  `yaml:"kp_config_LambdaMMaxDelay"`
 	KpConfigLambdaP                     float64 `yaml:"kp_config_LambdaP"`
-	KpConfigLambdaPMaxDelay             uint64  `yaml:"kp_config_LambdaPMaxDelay"`
-	KpConfigLogLevel                    string  `yaml:"kp_config_log_level"`
 	KpConfigMu                          float64 `yaml:"kp_config_Mu"`
-	KpConfigMuMaxDelay                  uint64  `yaml:"kp_config_MuMaxDelay"`
 	KpConfigNike                        string  `yaml:"kp_config_nike"`
-	KpConfigRatchetNike                 string  `yaml:"kp_config_ratchetNike"`
 	KpConfigPkiSignatureScheme          string  `yaml:"kp_config_pkiSignatureScheme"`
-	KpConfigSendRatePerMinute           uint64  `yaml:"kp_config_SendRatePerMinute"`
 	KpConfigUserForwardPayloadLength    int     `yaml:"kp_config_UserForwardPayloadLength"`
 	KpConfigWirekem                     string  `yaml:"kp_config_wirekem"`
 	KpDebugConnectTimeout               int     `yaml:"kp_debug_ConnectTimeout"`

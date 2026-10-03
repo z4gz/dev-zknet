@@ -6,7 +6,6 @@ RUN \
   --mount=type=cache,target=/var/lib/apt \
   apt-get update && apt-get install -y --no-install-recommends \
   ca-certificates \
-  libsnappy1v5 \
   && rm -rf /var/lib/apt/lists/*
 
 
@@ -15,8 +14,9 @@ FROM base AS builder
 ARG ENABLE_COMPRESSION=false
 ARG ENABLE_WARPED_EPOCH=false
 ARG KATZENPOST_DIR=/src/katzenpost
-ARG VERSION_GO=1.24.4
-ARG VERSION_ROCKSDB=10.2.1
+# must satisfy the `go` directive of both go.mod files (this repo's is the
+# higher of the two), otherwise the toolchain is downloaded at build time
+ARG VERSION_GO=1.26.8
 
 ENV GOROOT=/usr/local/go
 ENV PATH=$GOROOT/bin:$PATH
@@ -30,26 +30,7 @@ RUN \
   apt-get update && apt-get install -y --no-install-recommends \
   build-essential \
   git \
-  wget \
-  # rocksdb dependencies:
-  cmake \
-  liblz4-dev \
-  libsnappy-dev \
-  libzstd-dev \
-  rsync \
-  zlib1g-dev
-
-# Build RocksDB
-RUN \
-  cd /tmp && \
-  git clone --branch "v${VERSION_ROCKSDB}" --depth 1 https://github.com/facebook/rocksdb.git && \
-  cd rocksdb && \
-  make -j"$(nproc)" shared_lib && \
-  strip librocksdb.so.* && \
-  cp -a librocksdb.so* /usr/local/lib/ && \
-  cp -a include/* /usr/local/include/ && \
-  cd /tmp && rm -rf /tmp/rocksdb && \
-  ldconfig
+  wget
 
 # Install Go
 RUN f=go${VERSION_GO}.linux-amd64.tar.gz \
@@ -98,9 +79,5 @@ FROM base AS node
 ARG DIR_BIN=/opt/zkn
 
 COPY --from=builder /dest ${DIR_BIN}
-COPY --from=builder /usr/local/include/ /usr/local/include/
-COPY --from=builder /usr/local/lib/ /usr/local/lib/
-
-RUN ldconfig
 
 CMD ["/bin/bash"]

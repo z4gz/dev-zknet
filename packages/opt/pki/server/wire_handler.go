@@ -5,6 +5,7 @@
 package server
 
 import (
+	"context"
 	"crypto/hmac"
 	"net"
 	"time"
@@ -64,13 +65,13 @@ func (s *Server) onConn(conn net.Conn) {
 
 	// Handshake.
 	conn.SetDeadline(time.Now().Add(initialDeadline))
-	if err = wireConn.Initialize(conn); err != nil {
+	if err = wireConn.Initialize(context.Background(), conn); err != nil {
 		s.log.Debugf("Peer %v: Failed session handshake: %v", rAddr, err)
 		return
 	}
 
 	// Receive a command.
-	cmd, err := wireConn.RecvCommand()
+	cmd, err := wireConn.RecvCommand(context.Background())
 	if err != nil {
 		s.log.Debugf("Peer %v: Failed to receive command: %v", rAddr, err)
 		return
@@ -94,7 +95,7 @@ func (s *Server) onConn(conn net.Conn) {
 	// Send the response, if any.
 	if resp != nil {
 		conn.SetDeadline(time.Now().Add(responseDeadline))
-		if err = wireConn.SendCommand(resp); err != nil {
+		if err = wireConn.SendCommand(context.Background(), resp); err != nil {
 			s.log.Debugf("Peer %v: Failed to send response: %v", rAddr, err)
 		}
 	}

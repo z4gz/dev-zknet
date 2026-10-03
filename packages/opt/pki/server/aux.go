@@ -6,6 +6,7 @@ package server
 import (
 	"math"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/ZeroKnowledgeNetwork/appchain-agent/clients/go/chainbridge"
@@ -124,12 +125,53 @@ func (s *state) fsm() <-chan time.Time {
 
 // related: pki/server/server.go:computeLambdaG
 // compute lambdaG value for dynamic topology from number of nodes per layer, and not from config file
+// NOTE: 2026-10-03: Parameters.LambdaD was removed upstream along with the
+// drop-decoy Poisson process, so the single-node fallback is now LambdaP +
+// LambdaL, matching upstream's computeLambdaG. The n*log(n) term is retained
+// here: upstream switched to n^2*log(n)*Mu/g, but g (the gateway count) comes
+// from the config-file topology that this fork deliberately does not use.
 func zkpki_computeLambdaGFromNodesPerLayer(cfg *config.Config, npl int) float64 {
 	n := float64(npl)
 	if n == 1 {
-		return cfg.Parameters.LambdaP + cfg.Parameters.LambdaL + cfg.Parameters.LambdaD
+		return cfg.Parameters.LambdaP + cfg.Parameters.LambdaL
 	}
 	return n * math.Log(n)
+}
+
+// zkpki_configuredReplicas returns the ReplicaIDs and identity public keys of
+// every authorized storage replica, sorted by key so that all authorities
+// produce the same ordering. Mirrors the equivalent block in upstream's
+// authority/voting/server/state.go:getDocument.
+func (s *state) zkpki_configuredReplicas() ([]uint8, [][]byte) {
+	type replicaInfo struct {
+		id  uint8
+		key []byte
+	}
+	replicaInfos := make([]replicaInfo, 0, len(s.authorizedReplicaNodes))
+	for keyHash, info := range s.authorizedReplicaNodes {
+		pubKey, ok := s.reverseHash[keyHash]
+		if !ok {
+			s.log.Errorf("getDocument: missing reverse hash for authorized replica %x", keyHash)
+			continue
+		}
+		keyBytes, err := pubKey.MarshalBinary()
+		if err != nil {
+			s.log.Errorf("getDocument: failed to marshal identity key: %v", err)
+			continue
+		}
+		replicaInfos = append(replicaInfos, replicaInfo{id: info.ReplicaID, key: keyBytes})
+	}
+	slices.SortFunc(replicaInfos, func(a, b replicaInfo) int {
+		return slices.Compare(a.key, b.key)
+	})
+
+	ids := make([]uint8, len(replicaInfos))
+	keys := make([][]byte, len(replicaInfos))
+	for i, info := range replicaInfos {
+		ids[i] = info.id
+		keys[i] = info.key
+	}
+	return ids, keys
 }
 
 // Returns a random delay to distribute load across synchronized nodes
@@ -252,7 +294,14 @@ func zkpki_newState(st *state) error {
 			return st.s.cfg.Mixes[0], false, false, false
 		}
 		if len(st.s.cfg.StorageReplicas) == 1 {
-			return st.s.cfg.StorageReplicas[0], false, false, true
+			// Upstream gave replica entries their own StorageReplicaNode
+			// type; only Identifier and IdentityPublicKeyPem are needed
+			// below, so adapt instead of branching on the node type.
+			r := st.s.cfg.StorageReplicas[0]
+			return &config.Node{
+				Identifier:           r.Identifier,
+				IdentityPublicKeyPem: r.IdentityPublicKeyPem,
+			}, false, false, true
 		}
 		return nil, false, false, false
 	}

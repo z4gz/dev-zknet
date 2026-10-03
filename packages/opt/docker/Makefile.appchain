@@ -63,14 +63,14 @@ wait: $(net)/run.stamp
 
 ping: $(net)/run.stamp
 	$(docker_run) $(docker_image) $(dir_bin)/ping \
-		-c $(dir_base)/client2/client.toml \
+		-c $(dir_base)/client/client.toml \
 		-s echo \
 		-printDiff \
 		-n 10
 
 probe: $(net)/run.stamp
 	$(docker_run) $(docker_image) $(dir_bin)/walletshield \
-		-config $(dir_base)/client2/client.toml \
+		-config $(dir_base)/client/client.toml \
 		-log_level DEBUG \
 		-probe \
 		-probe_send_delay 1 \

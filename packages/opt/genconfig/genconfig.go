@@ -31,7 +31,7 @@ import (
 
 	vConfig "github.com/katzenpost/katzenpost/authority/voting/server/config"
 	cConfig "github.com/katzenpost/katzenpost/client/config"
-	cConfig2 "github.com/katzenpost/katzenpost/client2/config"
+	cTransport "github.com/katzenpost/katzenpost/client/transport"
 	cpki "github.com/katzenpost/katzenpost/core/pki"
 	"github.com/katzenpost/katzenpost/core/sphinx/geo"
 	sConfig "github.com/katzenpost/katzenpost/server/config"
@@ -70,7 +70,6 @@ type katzenpost struct {
 	logLevel  string
 	logWriter io.Writer
 
-	ratchetNIKEScheme  string
 	wireKEMScheme      string
 	pkiSignatureScheme sign.Scheme
 	sphinxGeometry     *geo.Geometry
@@ -84,7 +83,6 @@ type katzenpost struct {
 	addr           string
 	addrBind       string
 	nodeIdx        int
-	clientIdx      int
 	gatewayIdx     int
 	serviceNodeIdx int
 	hasPanda       bool
@@ -92,9 +90,8 @@ type katzenpost struct {
 	transport      string
 	metrics        string
 
-	debugConfigClient1 *cConfig.Debug
-	debugConfigClient2 *cConfig2.Debug
-	debugConfigServer  *sConfig.Debug
+	debugConfigClient *cConfig.Debug
+	debugConfigServer *sConfig.Debug
 }
 
 type AuthById []*vConfig.Authority
@@ -129,91 +126,34 @@ func addressesFromURLs(addrs []string) map[string][]string {
 	return addresses
 }
 
-func (s *katzenpost) genClient2Cfg() error {
-	os.Mkdir(filepath.Join(s.outDir, "client2"), 0700)
-	cfg := new(cConfig2.Config)
-
-	// abstract unix domain sockets only work on linux,
-	//cfg.ListenNetwork = "unix"
-	//cfg.ListenAddress = "@katzenpost"
-	// therefore if unix sockets are requires on non-linux platforms
-	// the solution is to specify a unix socket file path instead of
-	// and abstract unix socket name:
-	//cfg.ListenNetwork = "unix"
-	//cfg.ListenAddress = "/tmp/katzenzpost.socket"
-
-	// Use TCP by default so that the CI tests pass on all platforms
-	cfg.ListenNetwork = "tcp"
-	cfg.ListenAddress = "localhost:64331"
-
-	cfg.PKISignatureScheme = s.pkiSignatureScheme.Name()
-	cfg.WireKEMScheme = s.wireKEMScheme
-	cfg.SphinxGeometry = s.sphinxGeometry
-
-	// Logging section.
-	cfg.Logging = &cConfig2.Logging{File: "", Level: "DEBUG"}
-
-	// UpstreamProxy section
-	cfg.UpstreamProxy = &cConfig2.UpstreamProxy{Type: "none"}
-
-	// VotingAuthority section
-
-	peers := make([]*vConfig.Authority, 0)
-	for _, peer := range s.authorities {
-		peers = append(peers, peer)
-	}
-
-	sort.Sort(AuthById(peers))
-
-	cfg.VotingAuthority = &cConfig2.VotingAuthority{Peers: peers}
-
-	// Debug section
-	cfg.Debug = s.debugConfigClient2
-
-	gateways := make([]*cConfig2.Gateway, 0)
-	for i := 0; i < len(s.nodeConfigs); i++ {
-		if s.nodeConfigs[i].Gateway == nil {
-			continue
-		}
-
-		idPubKey := cfgIdKey(s.nodeConfigs[i], s.outDir)
-		linkPubKey := cfgLinkKey(s.nodeConfigs[i], s.outDir, cfg.WireKEMScheme)
-
-		gateway := &cConfig2.Gateway{
-			PKISignatureScheme: s.pkiSignatureScheme.Name(),
-			WireKEMScheme:      s.wireKEMScheme,
-			Name:               s.nodeConfigs[i].Server.Identifier,
-			IdentityKey:        idPubKey,
-			LinkKey:            linkPubKey,
-			Addresses:          s.nodeConfigs[i].Server.Addresses,
-		}
-		gateways = append(gateways, gateway)
-	}
-	cfg.PinnedGateways = &cConfig2.Gateways{
-		Gateways: gateways,
-	}
-
-	err := saveCfg(cfg, s.outDir)
-	if err != nil {
-		log.Printf("save config failure %s", err.Error())
-		return err
-	}
-	return nil
-}
-
 func (s *katzenpost) genClientCfg() error {
 	os.Mkdir(filepath.Join(s.outDir, "client"), 0700)
 	cfg := new(cConfig.Config)
 
-	cfg.RatchetNIKEScheme = s.ratchetNIKEScheme
-	cfg.WireKEMScheme = s.wireKEMScheme
+	// The listen transport is a discriminated union; exactly one subtable
+	// must be populated. Abstract unix domain sockets only work on linux:
+	//cfg.Listen = &cTransport.ListenConfig{
+	//	Unix: &cTransport.UnixListenConfig{Address: "@katzenpost"},
+	//}
+	// so on other platforms use a unix socket file path instead of an
+	// abstract unix socket name:
+	//cfg.Listen = &cTransport.ListenConfig{
+	//	Unix: &cTransport.UnixListenConfig{Address: "/tmp/katzenpost.socket"},
+	//}
+
+	// Use TCP by default so that the CI tests pass on all platforms.
+	// The address must be an IP literal: the client daemon refuses DNS
+	// hostnames unless cfg.AllowHostnameAddresses is set.
+	cfg.Listen = &cTransport.ListenConfig{
+		Tcp: &cTransport.TcpListenConfig{Address: "127.0.0.1:64331", Network: "tcp"},
+	}
+
 	cfg.PKISignatureScheme = s.pkiSignatureScheme.Name()
+	cfg.WireKEMScheme = s.wireKEMScheme
 	cfg.SphinxGeometry = s.sphinxGeometry
 
-	s.clientIdx++
-
 	// Logging section.
-	cfg.Logging = &cConfig.Logging{File: "", Level: s.logLevel}
+	cfg.Logging = &cConfig.Logging{File: "", Level: "DEBUG"}
 
 	// UpstreamProxy section
 	cfg.UpstreamProxy = &cConfig.UpstreamProxy{Type: "none"}
@@ -230,9 +170,34 @@ func (s *katzenpost) genClientCfg() error {
 	cfg.VotingAuthority = &cConfig.VotingAuthority{Peers: peers}
 
 	// Debug section
-	cfg.Debug = s.debugConfigClient1
+	cfg.Debug = s.debugConfigClient
+
+	gateways := make([]*cConfig.Gateway, 0)
+	for i := 0; i < len(s.nodeConfigs); i++ {
+		if s.nodeConfigs[i].Gateway == nil {
+			continue
+		}
+
+		idPubKey := cfgIdKey(s.nodeConfigs[i], s.outDir)
+		linkPubKey := cfgLinkKey(s.nodeConfigs[i], s.outDir, cfg.WireKEMScheme)
+
+		gateway := &cConfig.Gateway{
+			PKISignatureScheme: s.pkiSignatureScheme.Name(),
+			WireKEMScheme:      s.wireKEMScheme,
+			Name:               s.nodeConfigs[i].Server.Identifier,
+			IdentityKey:        idPubKey,
+			LinkKey:            cConfig.LinkPublicKey{PublicKey: linkPubKey},
+			Addresses:          s.nodeConfigs[i].Server.Addresses,
+		}
+		gateways = append(gateways, gateway)
+	}
+	cfg.PinnedGateways = &cConfig.Gateways{
+		Gateways: gateways,
+	}
+
 	err := saveCfg(cfg, s.outDir)
 	if err != nil {
+		log.Printf("save config failure %s", err.Error())
 		return err
 	}
 	return nil
@@ -446,7 +411,7 @@ func (s *katzenpost) genVotingAuthoritiesCfg(identifier string, numAuthorities i
 		authority := &vConfig.Authority{
 			Identifier:         identifier,
 			IdentityPublicKey:  idKey,
-			LinkPublicKey:      linkKey,
+			LinkPublicKey:      vConfig.LinkPublicKey{PublicKey: linkKey},
 			WireKEMScheme:      wirekem,
 			PKISignatureScheme: s.pkiSignatureScheme.Name(),
 			Addresses:          cfg.Server.Addresses,
@@ -507,7 +472,7 @@ func ParseFlags() GenconfigInput {
 	flag.StringVar(&gi.baseDir, "dir-base", "", "Absolute path as installation directory in config files (default -dir-out)")
 	flag.StringVar(&gi.binPrefix, "binary-prefix", "", "Prefix for binaries")
 	flag.StringVar(&gi.binSuffix, "binary-suffix", "", "Suffix for binaries")
-	flag.StringVar(&gi.cfgType, "type", "", "Type of config to generate: mix, gateway, servicenode, client1, client2")
+	flag.StringVar(&gi.cfgType, "type", "", "Type of config to generate: mix, gateway, servicenode, client")
 	flag.StringVar(&gi.identifier, "identifier", "", "Node identifier; lowercase alphanumeric with 4 to 20 characters (default -type)")
 	flag.StringVar(&gi.inputNetworkInfo, "input", "network.yml", "Path to network info file")
 	flag.StringVar(&gi.logLevel, "log-level", "INFO", "logging level could be set to: DEBUG, INFO, NOTICE, WARNING, ERROR, CRITICAL")
@@ -563,7 +528,6 @@ func Genconfig(gi GenconfigInput) error {
 	wirekem := &networkInfo.KpConfigWirekem                       // "Name of the KEM Scheme to be used with wire protocol"
 	kem := &networkInfo.KpConfigKem                               // "Name of the KEM Scheme to be used with Sphinx"
 	nike := &networkInfo.KpConfigNike                             // "Name of the NIKE Scheme to be used with Sphinx"
-	ratchetNike := &networkInfo.KpConfigRatchetNike               // "Name of the NIKE Scheme to be used with the doubleratchet"
 	pkiSignatureScheme := &networkInfo.KpConfigPkiSignatureScheme // "PKI Signature Scheme to be used"
 	UserForwardPayloadLength := &networkInfo.KpConfigUserForwardPayloadLength
 
@@ -576,10 +540,6 @@ func Genconfig(gi GenconfigInput) error {
 	}
 	if *kem != "" && *nike != "" {
 		return errors.New("nike and kem flags cannot both be set")
-	}
-
-	if *ratchetNike == "" {
-		return errors.New("ratchetNike must be set")
 	}
 
 	if *pkiSignatureScheme == "" {
@@ -605,7 +565,7 @@ func Genconfig(gi GenconfigInput) error {
 		*nrGateways = 1
 	case "servicenode":
 		*nrServiceNodes = 1
-	case "client1", "client2":
+	case "client":
 		*voting = false
 	default:
 		return errors.New("invalid type")
@@ -615,24 +575,19 @@ func Genconfig(gi GenconfigInput) error {
 		identifier = cfgType
 	}
 
+	// Upstream removed SendRatePerMinute, LambdaD/LambdaG and the six
+	// *MaxDelay safety caps from Parameters; the caps are now derived in
+	// the library by common.SafetyCap and LambdaG by the dirauth from the
+	// network topology. LambdaR is left unset so applyDefaults picks it up;
+	// the network.yml schema has no key for it yet.
 	parameters := &vConfig.Parameters{
-		SendRatePerMinute: networkInfo.KpConfigSendRatePerMinute,
-		Mu:                networkInfo.KpConfigMu,
-		MuMaxDelay:        networkInfo.KpConfigMuMaxDelay,
-		LambdaP:           networkInfo.KpConfigLambdaP,
-		LambdaPMaxDelay:   networkInfo.KpConfigLambdaPMaxDelay,
-		LambdaL:           networkInfo.KpConfigLambdaL,
-		LambdaLMaxDelay:   networkInfo.KpConfigLambdaLMaxDelay,
-		LambdaD:           networkInfo.KpConfigLambdaD,
-		LambdaDMaxDelay:   networkInfo.KpConfigLambdaDMaxDelay,
-		LambdaM:           networkInfo.KpConfigLambdaM,
-		LambdaMMaxDelay:   networkInfo.KpConfigLambdaMMaxDelay,
-		LambdaGMaxDelay:   networkInfo.KpConfigLambdaGMaxDelay,
+		Mu:      networkInfo.KpConfigMu,
+		LambdaP: networkInfo.KpConfigLambdaP,
+		LambdaL: networkInfo.KpConfigLambdaL,
+		LambdaM: networkInfo.KpConfigLambdaM,
 	}
 
 	s := &katzenpost{}
-
-	s.ratchetNIKEScheme = *ratchetNike
 
 	s.wireKEMScheme = *wirekem
 	if kemschemes.ByName(*wirekem) == nil {
@@ -650,13 +605,7 @@ func Genconfig(gi GenconfigInput) error {
 	s.logLevel = *logLevel
 	s.transport = *transport
 	s.metrics = *metrics
-	s.debugConfigClient1 = &cConfig.Debug{
-		DisableDecoyTraffic:         networkInfo.KpClientDebugDisableDecoyTraffic,
-		SessionDialTimeout:          networkInfo.KpClientDebugSessionDialTimeout,
-		InitialMaxPKIRetrievalDelay: networkInfo.KpClientDebugInitialMaxPKIDelay,
-		PollingInterval:             networkInfo.KpClientDebugPollingInterval,
-	}
-	s.debugConfigClient2 = &cConfig2.Debug{
+	s.debugConfigClient = &cConfig.Debug{
 		DisableDecoyTraffic:         networkInfo.KpClientDebugDisableDecoyTraffic,
 		SessionDialTimeout:          networkInfo.KpClientDebugSessionDialTimeout,
 		InitialMaxPKIRetrievalDelay: networkInfo.KpClientDebugInitialMaxPKIDelay,
@@ -789,15 +738,8 @@ func Genconfig(gi GenconfigInput) error {
 	// Also generate a client config for the configured gateway.
 	// TODO: client consumers get gateways from appchain.
 
-	if *cfgType == "client1" || *cfgType == "gateway" {
+	if *cfgType == "client" || *cfgType == "gateway" {
 		err = s.genClientCfg()
-		if err != nil {
-			return err
-		}
-	}
-
-	if *cfgType == "client2" || *cfgType == "gateway" {
-		err = s.genClient2Cfg()
 		if err != nil {
 			return err
 		}
@@ -810,8 +752,6 @@ func identifier(cfg interface{}) string {
 	switch cfg.(type) {
 	case *cConfig.Config:
 		return "client"
-	case *cConfig2.Config:
-		return "client2"
 	case *sConfig.Config:
 		return cfg.(*sConfig.Config).Server.Identifier
 	case *vConfig.Config:
@@ -825,8 +765,6 @@ func identifier(cfg interface{}) string {
 func toml_name(cfg interface{}) string {
 	switch cfg.(type) {
 	case *cConfig.Config:
-		return "client"
-	case *cConfig2.Config:
 		return "client"
 	case *sConfig.Config:
 		return "katzenpost"

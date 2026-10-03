@@ -59,12 +59,27 @@ type Server struct {
 	haltOnce   sync.Once
 }
 
+// Unused by this fork: see pki/server/aux.go:zkpki_computeLambdaGFromNodesPerLayer,
+// which derives lambdaG from the dynamic topology rather than the config file.
+// Kept in sync with upstream so the divergence stays legible.
 func computeLambdaG(cfg *config.Config) float64 {
-	n := float64(len(cfg.Topology.Layers[0].Nodes))
-	if n == 1 {
-		return cfg.Parameters.LambdaP + cfg.Parameters.LambdaL + cfg.Parameters.LambdaD
+	g := float64(len(cfg.GatewayNodes))
+	if g == 0 {
+		return cfg.Parameters.LambdaP + cfg.Parameters.LambdaL
 	}
-	return n * math.Log(n)
+
+	maxLayer := 0
+	for _, layer := range cfg.Topology.Layers {
+		if len(layer.Nodes) > maxLayer {
+			maxLayer = len(layer.Nodes)
+		}
+	}
+	n := float64(maxLayer)
+	if n <= 1 {
+		return cfg.Parameters.LambdaP + cfg.Parameters.LambdaL
+	}
+
+	return n * n * math.Log(n) * cfg.Parameters.Mu / g
 }
 
 func (s *Server) initDataDir() error {

@@ -21,9 +21,11 @@ import (
 	"github.com/katzenpost/hpqc/hash"
 	"github.com/katzenpost/hpqc/rand"
 
-	"github.com/katzenpost/katzenpost/client2"
-	"github.com/katzenpost/katzenpost/client2/config"
-	"github.com/katzenpost/katzenpost/client2/thin"
+	"github.com/katzenpost/katzenpost/client"
+	"github.com/katzenpost/katzenpost/client/config"
+	"github.com/katzenpost/katzenpost/client/thin"
+	ttransport "github.com/katzenpost/katzenpost/client/thin/transport"
+	ctransport "github.com/katzenpost/katzenpost/client/transport"
 	sConstants "github.com/katzenpost/katzenpost/core/sphinx/constants"
 
 	"github.com/ZeroKnowledgeNetwork/opt/common"
@@ -80,8 +82,44 @@ func sendRequest(thin *thin.ThinClient, httpRequestBytes []byte) ([]byte, error)
 
 type Server struct {
 	log    *log.Logger
-	daemon *client2.Daemon
+	daemon *client.Daemon
 	thin   *thin.ThinClient
+}
+
+// setListenAddress overrides the address of the client daemon's configured
+// thin-client listen transport. The transport flavor is chosen by the config
+// file's [Listen] subtable; only the address is overridable here.
+func setListenAddress(c *ctransport.ListenConfig, addr string) error {
+	if err := c.Validate(); err != nil {
+		return fmt.Errorf("cannot override client listen address: %w", err)
+	}
+	switch {
+	case c.Unix != nil:
+		c.Unix.Address = addr
+		c.Unix.Addresses = nil
+	case c.Tcp != nil:
+		c.Tcp.Address = addr
+	case c.Ws != nil:
+		c.Ws.Address = addr
+	}
+	return nil
+}
+
+// setDialAddress overrides the address the thin client dials, mirroring
+// setListenAddress for the [Dial] subtable.
+func setDialAddress(c *ttransport.DialConfig, addr string) error {
+	if err := c.Validate(); err != nil {
+		return fmt.Errorf("cannot override thin client dial address: %w", err)
+	}
+	switch {
+	case c.Unix != nil:
+		c.Unix.Address = addr
+	case c.Tcp != nil:
+		c.Tcp.Address = addr
+	case c.Ws != nil:
+		c.Ws.Address = addr
+	}
+	return nil
 }
 
 func main() {
@@ -132,8 +170,8 @@ func main() {
 		time.Sleep(time.Duration(d) * time.Second)
 	}
 
-	// start client2 daemon
-	var d *client2.Daemon
+	// start client daemon
+	var d *client.Daemon
 	var cfgThin *thin.Config
 	if !thinClientOnly {
 		cfg, err := config.LoadFile(configPath)
@@ -142,10 +180,12 @@ func main() {
 		}
 
 		if listenAddrClient != "" {
-			cfg.ListenAddress = listenAddrClient
+			if err := setListenAddress(cfg.Listen, listenAddrClient); err != nil {
+				panic(err)
+			}
 		}
 
-		d, err := client2.NewDaemon(cfg)
+		d, err = client.NewDaemon(cfg)
 		if err != nil {
 			panic(err)
 		}
@@ -160,12 +200,14 @@ func main() {
 		time.Sleep(time.Second * 3) // XXX ugly hack but works: FIXME
 	} else {
 		cfgThin, err = thin.LoadFile(configPath)
-
-		if listenAddrClient != "" {
-			cfgThin.Address = listenAddrClient
-		}
 		if err != nil {
 			panic(fmt.Errorf("failed to open thin client config: %s", err))
+		}
+
+		if listenAddrClient != "" {
+			if err := setDialAddress(cfgThin.Dial, listenAddrClient); err != nil {
+				panic(err)
+			}
 		}
 	}
 
@@ -261,7 +303,7 @@ func (s *Server) Handler(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(responsePayload)))
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, string(responsePayload))
+	w.Write(responsePayload)
 }
 
 func (s *Server) SendTestProbes(testProbeSendDelay int, testProbeCount int, testProbeResponseDelay int) {

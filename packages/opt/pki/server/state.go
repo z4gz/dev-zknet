@@ -83,6 +83,11 @@ type document struct {
 	raw []byte
 }
 
+type authorizedReplicaInfo struct {
+	Identifier string
+	ReplicaID  uint8
+}
+
 type state struct {
 	sync.RWMutex
 	worker.Worker
@@ -97,7 +102,7 @@ type state struct {
 	authorizedMixes        map[[publicKeyHashSize]byte]bool
 	authorizedGatewayNodes map[[publicKeyHashSize]byte]string
 	authorizedServiceNodes map[[publicKeyHashSize]byte]string
-	authorizedReplicaNodes map[[publicKeyHashSize]byte]string
+	authorizedReplicaNodes map[[publicKeyHashSize]byte]*authorizedReplicaInfo
 	authorizedAuthorities  map[[publicKeyHashSize]byte]bool
 	authorityLinkKeys      map[[publicKeyHashSize]byte]kem.PublicKey
 	authorityNames         map[[publicKeyHashSize]byte]string
@@ -554,31 +559,33 @@ func (s *state) getDocument(descriptors []*pki.MixDescriptor, replicaDescriptors
 	s.log.Debugf("computed lambdaG from %d nodes per layer is %f", nodesPerLayer, lambdaG)
 	/****** ZK-PKI ******/
 
+	// Build ConfiguredReplicaIDs and ConfiguredReplicaIdentityKeys from all
+	// authorized replicas. These lists remain stable even when replicas are
+	// offline, enabling consistent hashing (see replica/common/shard.go, which
+	// errors out when ConfiguredReplicaIdentityKeys is nil).
+	configuredReplicaIDs, configuredReplicaKeys := s.zkpki_configuredReplicas()
+
 	// Build the Document.
 	doc := &pki.Document{
-		Epoch:              s.votingEpoch,
-		GenesisEpoch:       s.genesisEpoch,
-		SendRatePerMinute:  params.SendRatePerMinute,
-		Mu:                 params.Mu,
-		MuMaxDelay:         params.MuMaxDelay,
-		LambdaP:            params.LambdaP,
-		LambdaPMaxDelay:    params.LambdaPMaxDelay,
-		LambdaL:            params.LambdaL,
-		LambdaLMaxDelay:    params.LambdaLMaxDelay,
-		LambdaD:            params.LambdaD,
-		LambdaDMaxDelay:    params.LambdaDMaxDelay,
-		LambdaM:            params.LambdaM,
-		LambdaMMaxDelay:    params.LambdaMMaxDelay,
-		LambdaG:            lambdaG,
-		LambdaGMaxDelay:    params.LambdaGMaxDelay,
-		Topology:           topology,
-		GatewayNodes:       gateways,
-		ServiceNodes:       serviceNodes,
-		StorageReplicas:    replicaDescriptors,
-		SharedRandomValue:  srv,
-		PriorSharedRandom:  s.priorSRV,
-		SphinxGeometryHash: s.geo.Hash(),
-		PKISignatureScheme: s.s.cfg.Server.PKISignatureScheme,
+		Version:                       pki.DocumentVersion,
+		Epoch:                         s.votingEpoch,
+		GenesisEpoch:                  s.genesisEpoch,
+		Mu:                            params.Mu,
+		LambdaP:                       params.LambdaP,
+		LambdaL:                       params.LambdaL,
+		LambdaM:                       params.LambdaM,
+		LambdaG:                       lambdaG,
+		LambdaR:                       params.LambdaR,
+		Topology:                      topology,
+		GatewayNodes:                  gateways,
+		ServiceNodes:                  serviceNodes,
+		StorageReplicas:               replicaDescriptors,
+		ConfiguredReplicaIDs:          configuredReplicaIDs,
+		ConfiguredReplicaIdentityKeys: configuredReplicaKeys,
+		SharedRandomValue:             srv,
+		PriorSharedRandom:             s.priorSRV,
+		SphinxGeometryHash:            s.geo.Hash(),
+		PKISignatureScheme:            s.s.cfg.Server.PKISignatureScheme,
 	}
 
 	/****** ZK-PKI ******/
@@ -776,14 +783,14 @@ func (s *state) sendCommandToPeer(peer *config.Authority, cmd commands.Command) 
 	}
 	defer session.Close()
 
-	if err = session.Initialize(conn); err != nil {
+	if err = session.Initialize(context.Background(), conn); err != nil {
 		return nil, err
 	}
-	err = session.SendCommand(cmd)
+	err = session.SendCommand(context.Background(), cmd)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := session.RecvCommand()
+	resp, err := session.RecvCommand(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -997,19 +1004,11 @@ func (s *state) tallyVotes(epoch uint64) ([]*pki.MixDescriptor, []*pki.ReplicaDe
 	for id, vote := range s.votes[epoch] {
 		// serialize the vote parameters and tally these as well.
 		params := &config.Parameters{
-			SendRatePerMinute: vote.SendRatePerMinute,
-			Mu:                vote.Mu,
-			MuMaxDelay:        vote.MuMaxDelay,
-			LambdaP:           vote.LambdaP,
-			LambdaPMaxDelay:   vote.LambdaPMaxDelay,
-			LambdaL:           vote.LambdaL,
-			LambdaLMaxDelay:   vote.LambdaLMaxDelay,
-			LambdaD:           vote.LambdaD,
-			LambdaDMaxDelay:   vote.LambdaDMaxDelay,
-			LambdaM:           vote.LambdaM,
-			LambdaMMaxDelay:   vote.LambdaMMaxDelay,
-			LambdaG:           computeLambdaG(s.s.cfg),
-			LambdaGMaxDelay:   vote.LambdaGMaxDelay,
+			Mu:      vote.Mu,
+			LambdaP: vote.LambdaP,
+			LambdaL: vote.LambdaL,
+			LambdaM: vote.LambdaM,
+			LambdaR: vote.LambdaR,
 		}
 		b := bytes.Buffer{}
 		e := gob.NewEncoder(&b)
@@ -1371,11 +1370,11 @@ func (s *state) pruneDocuments() {
 
 func (s *state) isReplicaDescriptorAuthorized(desc *pki.ReplicaDescriptor) bool {
 	pk := hash.Sum256(desc.IdentityKey)
-	name, ok := s.authorizedReplicaNodes[pk]
+	info, ok := s.authorizedReplicaNodes[pk]
 	if !ok {
 		return false
 	}
-	return name == desc.Name
+	return info.Identifier == desc.Name
 }
 
 func (s *state) isDescriptorAuthorized(desc *pki.MixDescriptor) bool {
@@ -2086,7 +2085,7 @@ func newState(s *Server) (*state, error) {
 		st.authorizedServiceNodes[pk] = v.Identifier
 		st.reverseHash[pk] = identityPublicKey
 	}
-	st.authorizedReplicaNodes = make(map[[publicKeyHashSize]byte]string)
+	st.authorizedReplicaNodes = make(map[[publicKeyHashSize]byte]*authorizedReplicaInfo)
 	for _, v := range st.s.cfg.StorageReplicas {
 		var identityPublicKey sign.PublicKey
 		var err error
@@ -2105,7 +2104,11 @@ func newState(s *Server) (*state, error) {
 		}
 
 		pk := hash.Sum256From(identityPublicKey)
-		st.authorizedReplicaNodes[pk] = v.Identifier
+		st.authorizedReplicaNodes[pk] = &authorizedReplicaInfo{
+			Identifier: v.Identifier,
+			ReplicaID:  v.ReplicaID,
+		}
+		st.reverseHash[pk] = identityPublicKey
 	}
 
 	st.authorizedAuthorities = make(map[[publicKeyHashSize]byte]bool)
