@@ -1,0 +1,14 @@
+{
+  "name": "@zknet/source",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "scripts": {},
+  "dependencies": {},
+  "devDependencies": {
+    "@nx/js": "23.2.1",
+    "@nx/workspace": "23.2.1",
+    "nx": "23.2.1",
+    "oxfmt": "^0.60.0"
+  }
+}
