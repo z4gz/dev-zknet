@@ -8,6 +8,9 @@ importers:
 
   .:
     devDependencies:
+      '@nx/docker':
+        specifier: 23.2.1
+        version: 23.2.1(nx@23.2.1)
       '@nx/js':
         specifier: 23.2.1
         version: 23.2.1(@babel/traverse@7.29.8)(nx@23.2.1)
@@ -610,6 +613,9 @@ packages:
     resolution: {integrity: sha512-uMGbMJpCi+y7eHBEWqygA8JITNgzFZdzVmcKX17EXnFreu14aWZ1kyo6Qh9pKIcbJigO3F46w6ANlYp6wgCovQ==}
     peerDependencies:
       nx: '>= 22 <= 24 || ^23.0.0-0'
+
+  '@nx/docker@23.2.1':
+    resolution: {integrity: sha512-CMorXMo8zmczRF8qs33ipS5Ipp4U5gEPmbMmbeNWf7hG/1wcx1ueNBAZ2YPXRLJRB1eIM0OqeI8ReBDS8ANs0Q==}
 
   '@nx/js@23.2.1':
     resolution: {integrity: sha512-52vAau7gmL4oFIohwAQ+rhnbbKeIAir6bKam0+lURvwSFHpkHPzMa0m8L/IlCO9mbRp2vx0gYONsPtL1k7jbqA==}
@@ -2311,6 +2317,13 @@ snapshots:
       semver: 7.8.5
       tslib: 2.8.1
       yargs-parser: 21.1.1
+
+  '@nx/docker@23.2.1(nx@23.2.1)':
+    dependencies:
+      '@nx/devkit': 23.2.1(nx@23.2.1)
+      tslib: 2.8.1
+    transitivePeerDependencies:
+      - nx
 
   '@nx/js@23.2.1(@babel/traverse@7.29.8)(nx@23.2.1)':
     dependencies:

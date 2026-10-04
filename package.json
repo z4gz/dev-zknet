@@ -6,6 +6,7 @@
   "scripts": {},
   "dependencies": {},
   "devDependencies": {
+    "@nx/docker": "23.2.1",
     "@nx/js": "23.2.1",
     "@nx/workspace": "23.2.1",
     "nx": "23.2.1",

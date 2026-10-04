@@ -1,0 +1,104 @@
+net ?= /tmp/appchain-mixnet
+url_appchain_indexer   ?= http://localhost:8081/graphql
+url_appchain_processor ?= http://localhost:8082/graphql
+url_appchain_sequencer ?= http://localhost:8080/graphql
+dir_base := /mixnet
+dir_bin := /opt/zkn
+docker_image ?= zkn/node:latest
+docker_image_agent ?= zkn/agent:latest
+docker := $(shell if which podman|grep -q .; then echo podman; else echo docker; fi)
+docker_user ?= $(shell [ "$(docker)" = "podman" ] && echo 0:0 || echo $${SUDO_UID:-$$(id -u)}:$${SUDO_GID:-$$(id -g)})
+docker_compose ?= DOCKER_USER=$(docker_user) $(shell if which podman|grep -q .; then echo DOCKER_HOST="unix://$$XDG_RUNTIME_DIR/podman/podman.sock"; fi) docker compose
+docker_args := --user ${docker_user}
+docker_run := $(docker) run $(docker_args) --network=host --rm --volume $(shell readlink -f $(net)):$(dir_base)
+
+warped?=true
+num_mixes=3
+num_gateways=1
+num_servicenodes=1
+
+probe_count ?= 1
+
+export
+
+.PHONY: help
+help:
+	@echo
+	@echo "These make targets allow you to control the test network:"
+	@echo " image   - build node docker image"
+	@echo " config  - generate config for test network nodes"
+	@echo " init    - register and activate a network with local appchain"
+	@echo " start   - start the testnet"
+	@echo " _start  - start the testnet without re-build/config"
+	@echo " stop    - stop the testnet"
+	@echo " wait    - wait for testnet to have consensus"
+	@echo " probe   - send a probe over the testnet"
+	@echo " clean   - stop, remove docker image and config"
+
+$(net):
+	mkdir -vp $(net)
+
+image: $(net)/image.stamp
+$(net)/image.stamp: $(net)
+	$(docker) build \
+		--build-arg DIR_BIN=$(dir_bin) \
+		--build-arg ENABLE_WARPED_EPOCH=$(warped) \
+		--file ./node/Dockerfile \
+		--tag $(docker_image) \
+		../
+	touch $(net)/image.stamp
+
+config: $(net)/docker-compose.yml
+$(net)/docker-compose.yml: genconfig.sh $(net) $(net)/image.stamp
+	./genconfig.sh
+
+_start: $(net)/run.stamp
+start: config image $(net)/run.stamp
+$(net)/run.stamp:
+	cd $(net); $(docker_compose) up --remove-orphans -d; $(docker) compose top
+	touch $(net)/run.stamp
+
+wait: $(net)/run.stamp
+	$(docker_run) $(docker_image) $(dir_bin)/fetch -f $(dir_base)/client/client.toml
+
+ping: $(net)/run.stamp
+	$(docker_run) $(docker_image) $(dir_bin)/ping \
+		-c $(dir_base)/client/client.toml \
+		-s echo \
+		-printDiff \
+		-n 10
+
+probe: $(net)/run.stamp
+	$(docker_run) $(docker_image) $(dir_bin)/walletshield \
+		-config $(dir_base)/client/client.toml \
+		-log_level DEBUG \
+		-probe \
+		-probe_send_delay 1 \
+		-probe_count $(probe_count)
+
+.PHONY: init
+init: $(net)
+	$(docker_run) \
+		--env URL_APPCHAIN_INDEXER=$(url_appchain_indexer) \
+		--env URL_APPCHAIN_PROCESSOR=$(url_appchain_processor) \
+		--env URL_APPCHAIN_SEQUENCER=$(url_appchain_sequencer) \
+		--volume $(shell readlink -f ./network.yml):/tmp/network.yml \
+		$(docker_image_agent) \
+		bin/network-init.sh \
+			dev-$(shell date +%H%M%S) \
+			/tmp/network.yml \
+			$(dir_base)
+
+.PHONY: stop
+stop:
+	[ -e $(net) ] && cd $(net) && $(docker_compose) down --remove-orphans
+	rm -fv $(net)/run.stamp
+
+.PHONY: clean
+clean: stop
+	rm -rfv $(net)
+
+.PHONY: clean-image
+clean-image:
+	$(docker) rmi $(docker_image)
+	rm -fv $(net)/image.stamp
