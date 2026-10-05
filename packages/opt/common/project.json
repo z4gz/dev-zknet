@@ -1,0 +1,16 @@
+{
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "name": "opt-common",
+  "projectType": "library",
+  "targets": {
+    "test": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["{projectRoot}/**/*.go", "optModule"],
+      "options": {
+        "command": "go test ./...",
+        "cwd": "{projectRoot}"
+      }
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "$schema": "../../../../node_modules/nx/schemas/project-schema.json",
+  "name": "walletshield",
+  "projectType": "application",
+  "implicitDependencies": ["opt-common", "http-proxy"],
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["{projectRoot}/**/*.go", "^default", "optModule"],
+      "outputs": ["{projectRoot}/walletshield"],
+      "options": {
+        "command": "make app-walletshield",
+        "cwd": "packages/opt"
+      }
+    },
+    "dev-remote": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "dependsOn": ["build"],
+      "options": {
+        "command": "./walletshield -config \"${remote_client_config:?set remote_client_config=/path/to/client.toml}\" -listen \"${ws_listen:-:7070}\" -log_level ${log_level:-DEBUG} ${ws_extra_flags:-}",
+        "cwd": "{projectRoot}"
+      }
+    }
+  }
+}

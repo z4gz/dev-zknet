@@ -1,0 +1,79 @@
+{
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "name": "mixnet",
+  "projectType": "application",
+  "implicitDependencies": ["opt-common", "http-proxy", "walletshield"],
+  "targets": {
+    "start": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "make -e start",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "ready": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "timeout ${ready_timeout:-900} make -e wait",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "probe": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "make -e walletshield-probe",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "serve": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "make -e walletshield-start",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "e2e-rpc-matrix": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "./test.sh",
+        "cwd": "packages/opt/tests/e2e/walletshield"
+      }
+    },
+    "e2e-rpc": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "parallel": false,
+      "options": {
+        "commands": ["./test.sh /ethereum", "./test.sh /polygon", "./test.sh /bsc"],
+        "cwd": "packages/opt/tests/e2e/walletshield",
+        "parallel": false
+      }
+    },
+    "stop": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "commands": ["make -e walletshield-stop", "make -e stop"],
+        "cwd": "{projectRoot}",
+        "parallel": false
+      }
+    },
+    "dev-local": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "commands": [
+          "pnpm nx run mixnet:start",
+          "pnpm nx run mixnet:ready",
+          "pnpm nx run mixnet:serve"
+        ],
+        "parallel": false
+      }
+    }
+  }
+}

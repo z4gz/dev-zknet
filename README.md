@@ -1,98 +1,150 @@
-# ZknetworkGit
+# zknetwork source
 
-<a alt="Nx logo" href="https://nx.dev" target="_blank" rel="noreferrer"><img src="https://raw.githubusercontent.com/nrwl/nx/master/images/nx-logo.png" width="45"></a>
-
-✨ Your new, shiny [Nx workspace](https://nx.dev) is ready ✨.
-
-[Learn more about this workspace setup and its capabilities](https://nx.dev/getting-started/intro#learn-nx?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects) or run `npx nx graph` to visually explore what was created. Now, let's get you up to speed!
-
-## Run tasks
-
-To run tasks with Nx use:
+ZKNetwork's [Nx](https://nx.dev) monorepo contains the `packages/opt` Go module:
+WalletShield, the `http_proxy` CBOR plugin, and the local Katzenpost mixnet tooling.
+The projects below build and exercise the client → mixnet → RPC path.
 
 ```sh
-npx nx <target> <project-name>
+pnpm install
+pnpm nx show projects
 ```
 
-For example:
+## Projects
+
+Four Nx projects define the active Go and Make workflows:
+
+| Project        | Root                                                  | Targets                                                          |
+| -------------- | ----------------------------------------------------- | ---------------------------------------------------------------- |
+| `opt-common`   | `packages/opt/common`                                 | `test`                                                           |
+| `http-proxy`   | `packages/opt/server_plugins/cbor_plugins/http_proxy` | `build`                                                          |
+| `walletshield` | `packages/opt/apps/walletshield`                      | `build`, `dev-remote`                                            |
+| `mixnet`       | `packages/opt/docker`                                 | `start`, `ready`, `probe`, `serve`, `e2e-rpc`, `e2e-rpc-matrix`, `stop`, `dev-local` |
+
+`http-proxy` is one project for a library plus its `cmd/http_proxy` binary, not one per
+file.
+
+### Nx wraps the existing Make targets — it does not replace them
+
+Every target is `nx:run-commands` around a recipe that already exists:
+
+- `opt-common:test` → `go test ./...` in `packages/opt/common`.
+- `http-proxy:build` → `make http_proxy` in `packages/opt` (the module `Makefile`,
+  which carries the `-ldflags -X …/common.CompressionEnabled` build flag).
+- `walletshield:build` → `make app-walletshield` in `packages/opt`.
+- every `mixnet:*` target → `make -e <target>` in `packages/opt/docker`, the thin
+  wrapper that passes through to the pinned Katzenpost `docker/Makefile`. `-e` is what
+  lets you override the wrapper's own variables from the environment.
+
+There is no Go Nx plugin and no generated graph parser. Consequently the Go dependency
+edges are declared by hand with `implicitDependencies`
+(`walletshield → opt-common, http-proxy`; `http-proxy → opt-common`; `mixnet → all
+three`) and must be updated if the Go imports change.
+
+### Caching
+
+The three `build`/`test` targets are cacheable and declare `inputs` (project `*.go`,
+`^default` for dependencies, and the `optModule` named input: `packages/opt/go.mod`,
+`go.sum` and `Makefile`) plus `outputs` for the two binaries. Every `mixnet:*` target
+sets `"cache": false` — its real output is host and Docker daemon state, which a cache
+cannot restore.
+
+`build`/`test` do **not** `dependsOn` each other: `go build` resolves the sibling
+packages from source, and the mixnet build compiles its own binaries inside the build
+container. Ordering is only declared where it is actually required
+(`walletshield:dev-remote → walletshield:build`, and the `mixnet:dev-local` chain).
+
+## Build and test
 
 ```sh
-npx nx build myproject
+pnpm nx run-many -t build,test       # all Go projects
+pnpm nx affected -t build,test       # only what a change touches
+pnpm nx run walletshield:build
 ```
 
-These targets are either [inferred automatically](https://nx.dev/concepts/inferred-tasks?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects) or defined in the `project.json` or `package.json` files.
+## Run the local mixnet
 
-[More about running tasks in the docs &raquo;](https://nx.dev/features/run-tasks?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-
-## Add new projects
-
-While you could add new projects to your workspace manually, you might want to leverage [Nx plugins](https://nx.dev/concepts/nx-plugins?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects) and their [code generation](https://nx.dev/features/generate-code?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects) feature.
-
-To install a new plugin you can use the `nx add` command. Here's an example of adding the React plugin:
+Brings up a pinned local Katzenpost testnet (version read from `packages/opt/go.mod`),
+injects the `http_proxy` plugin into its single service node, and runs WalletShield
+against it.
 
 ```sh
-npx nx add @nx/react
+pnpm nx run mixnet:dev-local         # = start → ready → serve, in order
 ```
 
-Use the plugin's generator to create new projects. For example, to create a new React app or library:
+or step by step, which is what `dev-local` runs:
 
 ```sh
-# Generate an app
-npx nx g @nx/react:app demo
-
-# Generate a library
-npx nx g @nx/react:lib some-lib
+pnpm nx run mixnet:start             # clone Katzenpost if needed, build, compose up (~5 min cold)
+pnpm nx run mixnet:ready             # bounded readiness: upstream `wait`, under `timeout` (~1 min)
+pnpm nx run mixnet:probe             # WalletShield mixnet round-trip probe
+pnpm nx run mixnet:serve             # WalletShield client, listening on :7070
+pnpm nx run mixnet:e2e-rpc           # /ethereum, /polygon, /bsc through the proxy to real RPC
+pnpm nx run mixnet:e2e-rpc-matrix    # diagnostic sweep of all configured RPC fixtures
+pnpm nx run mixnet:stop              # stop the client and the compose project
 ```
 
-You can use `npx nx list` to get a list of installed plugins. Then, run `npx nx list <plugin-name>` to learn about more specific capabilities of a particular plugin. Alternatively, [install Nx Console](https://nx.dev/getting-started/editor-setup?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects) to browse plugins and generators in your IDE.
+`mixnet:ready` wraps upstream's own `wait` (which fetches until the PKI document is
+ready) inside `timeout ${ready_timeout:-900}`. It is a real probe with a bound, not a
+sleep. Nothing here relies on Nx `continuous: true`, which signals neither readiness nor
+container teardown.
 
-[Learn more about Nx plugins &raquo;](https://nx.dev/concepts/nx-plugins?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects) | [Browse the plugin registry &raquo;](https://nx.dev/plugin-registry?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
+**`mixnet:stop` is the teardown.** It stops only what these targets own: the
+`walletshield` container and the compose project of the Katzenpost checkout in use.
 
-## Set up CI!
+**Prerequisites:** `docker` (or `podman`), `make`, `git`, `go`, and — for the port guard
+upstream runs as part of `start` — `ss` (`iproute2`). `e2e-rpc` and
+`e2e-rpc-matrix` additionally need `curl` and `jq`. Both reach live public RPC
+endpoints. `e2e-rpc` is the representative transport gate; `e2e-rpc-matrix` runs
+the full provider/chain fixture set and is diagnostic only. Providers, networks,
+and recorded responses can change independently of this code, so matrix failures
+are not a CI gate.
 
-### Step 1
+### One mixnet per host
 
-To connect to Nx Cloud, run the following command:
+`mixnet:serve` uses the wrapper's fixed container name `walletshield` and listener
+`:7070`, and the testnet reserves a port band derived from `base_port`. Run one local
+mixnet per host. To run against a Katzenpost checkout and port band other than the
+defaults — for example to keep a second developer's stack off someone else's — override
+through the environment, which is why the targets use `make -e`:
 
 ```sh
-npx nx connect
+env katzenpost_dir=/tmp/katzenpost.mine distro=debian-trixie base_port=52000 \
+  pnpm nx run mixnet:start
 ```
 
-Connecting to Nx Cloud ensures a [fast and scalable CI](https://nx.dev/ci/intro/why-nx-cloud?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects) pipeline. It includes features such as:
+`distro` selects the base image tag (`katzenpost-$(distro)_base`), so changing it also
+avoids retagging an image someone else built. The default is `alpine`.
 
-- [Remote caching](https://nx.dev/ci/features/remote-cache?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-- [Task distribution across multiple machines](https://nx.dev/ci/features/distribute-task-execution?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-- [Automated e2e test splitting](https://nx.dev/ci/features/split-e2e-tasks?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-- [Task flakiness detection and rerunning](https://nx.dev/ci/features/flaky-tasks?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
+> ⚠️ `make -n` is **not** a dry run here. The wrapper's pass-through rule invokes
+> `$(MAKE)`, which GNU make executes even under `-n`, and `clone-katzenpost` really
+> clones. Likewise `make clean` runs `rm -rf $(katzenpost_dir)` — it deletes the
+> Katzenpost checkout, which is why no Nx target wraps it.
 
-### Step 2
-
-Use the following command to configure a CI workflow for your workspace:
+## Run against a remote mixnet
 
 ```sh
-npx nx g ci-workflow
+env remote_client_config=/path/to/client.toml pnpm nx run walletshield:dev-remote
 ```
 
-[Learn more about Nx on CI](https://nx.dev/ci/intro/ci-with-nx#ready-get-started-with-your-provider?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
+`dev-remote` runs only the WalletShield binary. It has no dependency on any `mixnet:*`
+target, so it cannot start, mutate or tear down a local topology, and
+`remote_client_config` is required — unset, the target fails instead of silently
+defaulting. `ws_listen` (default `:7070`), `log_level` and `ws_extra_flags` are optional
+overrides.
 
-## Install Nx Console
+## Conventions
 
-Nx Console is an editor extension that enriches your developer experience. It lets you run tasks, generate code, and improves code autocompletion in your IDE. It is available for VSCode and IntelliJ.
+- Run tasks through Nx (`pnpm nx run`, `run-many`, `affected`) rather than the
+  underlying tooling, and prefix with `pnpm` to use the pinned CLI.
+- `packages/opt` is a **nested Go module**. There is no `go.mod` at the workspace root,
+  and the module path `github.com/ZeroKnowledgeNetwork/opt` is load-bearing in both
+  imports and `-ldflags -X` build flags — do not rename or re-root it.
+- See `AGENTS.md` for the Nx skills and agent guidance that apply to this workspace.
 
-[Install Nx Console &raquo;](https://nx.dev/getting-started/editor-setup?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
+## Other source paths
 
-## Useful links
-
-Learn more:
-
-- [Learn more about this workspace setup](https://nx.dev/getting-started/intro#learn-nx?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-- [Learn about Nx on CI](https://nx.dev/ci/intro/ci-with-nx?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-- [Releasing Packages with Nx release](https://nx.dev/features/manage-releases?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-- [What are Nx plugins?](https://nx.dev/concepts/nx-plugins?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-
-And join the Nx community:
-
-- [Discord](https://go.nx.dev/community)
-- [Follow us on X](https://twitter.com/nxdevtools) or [LinkedIn](https://www.linkedin.com/company/nrwl)
-- [Our Youtube channel](https://www.youtube.com/@nxdevtools)
-- [Our blog](https://nx.dev/blog?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
+`packages/opt/pki/` and `genconfig/` remain in the Go module, but are outside
+the current Nx project graph and voting-mixnet development path. The
+`docker/node/` and `docker/qemu-runner/` directories have no Nx targets here.
+`packages/opt/tests/` holds the RPC fixtures used by `mixnet:e2e-rpc` and
+`mixnet:e2e-rpc-matrix`; a separate project is unnecessary for those scripts.
