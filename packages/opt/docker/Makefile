@@ -99,7 +99,17 @@ custom-binaries: $(net_dir)/http_proxy.$(distro)
 
 .PHONY: custom-config
 custom-config:
-	printf '%s\n' "$$SERVICENODE_PLUGINS" | sed -i '/^\[ServiceNode\]/r /dev/stdin' $(net_dir)/servicenode1/katzenpost.toml
+	@file="$(net_dir)/servicenode1/katzenpost.toml"; \
+	tmp="$$(mktemp)"; \
+	plugin="$$(mktemp)"; \
+	sed '/^# BEGIN SERVICENODE_PLUGINS$$/,/^# END SERVICENODE_PLUGINS$$/d' "$$file" > "$$tmp"; \
+	{ \
+		echo '# BEGIN SERVICENODE_PLUGINS'; \
+		printf '%s\n' "$$SERVICENODE_PLUGINS"; \
+		echo '# END SERVICENODE_PLUGINS'; \
+	} > "$$plugin"; \
+	sed "/^\[ServiceNode\]$$/r $$plugin" "$$tmp" > "$$file"; \
+	rm -f "$$tmp" "$$plugin"
 
 .PHONY: clone-katzenpost
 clone-katzenpost:
