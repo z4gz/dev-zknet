@@ -1,13 +1,32 @@
 /* eslint-disable */
-import { readFileSync } from 'fs';
 
-// Reading the SWC compilation config for the spec files
-const swcJestConfig = JSON.parse(
-  readFileSync(`${__dirname}/.spec.swcrc`, 'utf-8'),
-);
-
-// Disable .swcrc look-up by SWC core because we're passing in swcJestConfig ourselves
-swcJestConfig.swcrc = false;
+// SWC compilation config for the spec files, inlined rather than read from
+// `.spec.swcrc`: this package is `"type": "module"`, so Jest loads this config
+// as ESM, where `__dirname` does not exist.
+const swcJestConfig = {
+  // Disable .swcrc look-up by SWC core because we're passing in swcJestConfig ourselves
+  swcrc: false,
+  jsc: {
+    target: 'es2017',
+    parser: {
+      syntax: 'typescript',
+      decorators: true,
+      dynamicImport: true,
+    },
+    transform: {
+      decoratorMetadata: true,
+      legacyDecorator: true,
+    },
+    keepClassNames: true,
+    externalHelpers: true,
+    loose: true,
+  },
+  module: {
+    type: 'es6',
+  },
+  sourceMaps: true,
+  exclude: [],
+};
 
 export default {
   displayName: '@zknet/sdk',
