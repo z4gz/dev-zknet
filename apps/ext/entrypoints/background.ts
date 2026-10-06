@@ -1,7 +1,7 @@
 import config from '@/src/config';
 import { packFetchResponse } from '@/src/fetch-wire';
 import { extensionMsgr } from '@/src/messaging/extension';
-import { RemoteClientStatus } from '@/src/types';
+import type { RemoteClientStatus } from '@/src/types';
 import { JsonRpcWebSocket } from '@/src/ws-rpc-client';
 
 const extractPort = (s: string): string | null =>

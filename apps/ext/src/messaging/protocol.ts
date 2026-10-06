@@ -1,5 +1,5 @@
-import { PackedFetchResponse } from '../fetch-wire';
-import { ClientState } from '../types';
+import type { PackedFetchResponse } from '../fetch-wire';
+import type { ClientState } from '../types';
 
 // https://webext-core.aklinker1.io/messaging/protocol-maps
 export interface ProtocolMap {

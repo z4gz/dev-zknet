@@ -15,7 +15,7 @@
     "postinstall": "wxt prepare"
   },
   "dependencies": {
-    "@webext-core/messaging": "^2.3.0",
+    "@webext-core/messaging": "^4.0.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },
@@ -28,6 +28,6 @@
     "daisyui": "^5.7.47",
     "tailwindcss": "^4.3.3",
     "typescript": "~6.0.3",
-    "wxt": "^0.20.27"
+    "wxt": "^0.21.4"
   }
 }
