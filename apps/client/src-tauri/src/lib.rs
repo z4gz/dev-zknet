@@ -36,7 +36,7 @@ pub fn run() {
                 // https://tauri.app/plugin/logging/#formatting
                 // https://github.com/tauri-apps/plugins-workspace/blob/v2/plugins/log/src/lib.rs#L278
                 .format(|out, message, record| {
-                    let tf = time::format_description::parse(
+                    let tf = time::format_description::parse_borrowed::<2>(
                         "[year]-[month]-[day] [hour]:[minute]:[second]",
                     )
                     .unwrap();
