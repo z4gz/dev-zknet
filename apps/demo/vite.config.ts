@@ -1,11 +1,14 @@
 import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react-swc';
+import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
-import tsconfigPaths from 'vite-tsconfig-paths';
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), tailwindcss(), tsconfigPaths()],
+  plugins: [react(), tailwindcss()],
+  resolve: {
+    // Replaces vite-tsconfig-paths, native since Vite 8.
+    tsconfigPaths: true,
+  },
   server: {
     port: 3002,
   },
