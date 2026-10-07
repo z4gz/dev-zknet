@@ -24,9 +24,7 @@ export type FetchFailure = {
 
 export type PackedFetchResponse = FetchSuccess | FetchFailure;
 
-export async function packFetchResponse(
-  resOrErr: Response | Error,
-): Promise<PackedFetchResponse> {
+export async function packFetchResponse(resOrErr: Response | Error): Promise<PackedFetchResponse> {
   if (resOrErr instanceof Error) {
     return { tag: 'failure', name: resOrErr.name, message: resOrErr.message };
   }
@@ -59,9 +57,7 @@ export async function packFetchResponse(
 
 export function unpackFetchResponse(p: PackedFetchResponse): Response {
   if (p.tag === 'failure') {
-    const Ctor = (globalThis as any)[p.name] as
-      | (new (msg: string) => Error)
-      | undefined;
+    const Ctor = (globalThis as any)[p.name] as (new (msg: string) => Error) | undefined;
     throw Ctor ? new Ctor(p.message) : new Error(p.message);
   }
 
@@ -76,7 +72,8 @@ export function unpackFetchResponse(p: PackedFetchResponse): Response {
       ? JSON.stringify(p.body)
       : p.bodyType === 'text'
         ? (p.body as string)
-        : (p.body as Uint8Array);
+        : // packed from res.arrayBuffer(), so ArrayBuffer-backed
+          (p.body as Uint8Array<ArrayBuffer>);
 
   return new Response(bodyInit, {
     status: p.status,

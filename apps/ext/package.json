@@ -1,8 +1,8 @@
 {
   "name": "@zknet/ext",
-  "description": "manifest.json description",
-  "private": true,
   "version": "0.0.0",
+  "private": true,
+  "description": "manifest.json description",
   "type": "module",
   "scripts": {
     "dev": "wxt",
@@ -11,11 +11,11 @@
     "build:firefox": "wxt build -b firefox",
     "zip": "wxt zip",
     "zip:firefox": "wxt zip -b firefox",
-    "compile": "tsc --noEmit",
     "postinstall": "wxt prepare"
   },
   "dependencies": {
     "@webext-core/messaging": "^4.0.0",
+    "@zknet/sdk": "workspace:*",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },

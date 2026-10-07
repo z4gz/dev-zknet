@@ -4,8 +4,7 @@ import { extensionMsgr } from '@/src/messaging/extension';
 import type { RemoteClientStatus } from '@/src/types';
 import { JsonRpcWebSocket } from '@/src/ws-rpc-client';
 
-const extractPort = (s: string): string | null =>
-  s.match(/:(\d{1,5})(?=$|[/?#])/)?.[1] ?? null;
+const extractPort = (s: string): string | null => s.match(/:(\d{1,5})(?=$|[/?#])/)?.[1] ?? null;
 
 export default defineBackground(() => {
   let clientStatus: RemoteClientStatus | null = null;
@@ -17,11 +16,9 @@ export default defineBackground(() => {
 
   const setClientStatus = (status: RemoteClientStatus | null) => {
     clientStatus = status;
-    extensionMsgr
-      .sendMessage('zknet.client.state', getClientState())
-      .catch(() => {
-        // ignore errors, including if no message listeners yet
-      });
+    extensionMsgr.sendMessage('zknet.client.state', getClientState()).catch(() => {
+      // ignore errors, including if no message listeners yet
+    });
   };
 
   const url = `http://${config.ZKNET_CLIENT_HOST}:${config.ZKNET_CLIENT_PORT}`;
@@ -41,7 +38,7 @@ export default defineBackground(() => {
       try {
         const status = await ws.call('getStatus');
         setClientStatus(status);
-      } catch (err) {
+      } catch {
         // ignore errors
       }
     },
@@ -56,8 +53,7 @@ export default defineBackground(() => {
       if (!rpc.isConnected() || clientStatus === null)
         throw new Error('ZKNetwork Client is not running');
 
-      if (!clientStatus.network.isConnected)
-        throw new Error('ZKNetwork is not connected');
+      if (!clientStatus.network.isConnected) throw new Error('ZKNetwork is not connected');
 
       const wla = extractPort(clientStatus.settings.walletshield.listenAddress);
       if (wla === null) throw new Error('Invalid listen address');
