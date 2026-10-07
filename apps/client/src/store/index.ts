@@ -44,21 +44,15 @@ export const useStore = create(
       setClientPid: (clientPid: number) => set({ clientPid }),
       setIsConnected: (isConnected: boolean) => set({ isConnected }),
       setIsStopping: (isStopping: boolean) => set({ isStopping }),
-      setIsPlatformSupported: (isPlatformSupported: boolean) =>
-        set({ isPlatformSupported }),
-      setMessage: (
-        messageType: 'error' | 'info' | 'success',
-        message: string,
-      ) => set({ message, messageType }),
-      setNetworkConnected: (networkConnected: string) =>
-        set({ networkConnected }),
+      setIsPlatformSupported: (isPlatformSupported: boolean) => set({ isPlatformSupported }),
+      setMessage: (messageType: 'error' | 'info' | 'success', message: string) =>
+        set({ message, messageType }),
+      setNetworkConnected: (networkConnected: string) => set({ networkConnected }),
       setNetworks: (networks: string[]) => set({ networks }),
       setPlatformArch: (platformArch: string) => set({ platformArch }),
       setUpdateStatus: (updateStatus: UpdateStatus) => set({ updateStatus }),
 
-      setWalletshieldListenAddress: async (
-        walletshieldListenAddress: string,
-      ) => {
+      setWalletshieldListenAddress: async (walletshieldListenAddress: string) => {
         set({ walletshieldListenAddress });
         await store.set('walletshieldListenAddress', walletshieldListenAddress);
         await store.save();

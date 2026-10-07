@@ -8,11 +8,7 @@ import { Child, Command } from '@tauri-apps/plugin-shell';
 import { download } from '@tauri-apps/plugin-upload';
 import { useStore } from '../store';
 import { notifyAPIClientsOfStatusChange } from '../services/api';
-import {
-  getNetworks,
-  getWalletshieldListenAddress,
-  getZKNetClientCfg,
-} from '../utils';
+import { getNetworks, getWalletshieldListenAddress, getZKNetClientCfg } from '../utils';
 
 export function Networks() {
   const [dlProgress, setDlProgress] = useState(0);
@@ -80,8 +76,7 @@ export function Networks() {
     const fileClientCfg = await path.join(dirNetwork, 'client.toml');
     const fileServices = await path.join(dirNetwork, 'services.json');
     const fileWalletshield =
-      (await path.join(dirNetwork, 'walletshield')) +
-      (platform() === 'windows' ? '.exe' : '');
+      (await path.join(dirNetwork, 'walletshield')) + (platform() === 'windows' ? '.exe' : '');
     const updateInterval = 1; // download progress update interval
 
     ////////////////////////////////////////////////////////////////////////
@@ -101,8 +96,7 @@ export function Networks() {
     // save the network's assets in a network-specific directory
     ////////////////////////////////////////////////////////////////////////
     log.debug(`local network directory: ${dirNetwork}`);
-    if (!(await exists(dirNetwork)))
-      await mkdir(dirNetwork, { recursive: true });
+    if (!(await exists(dirNetwork))) await mkdir(dirNetwork, { recursive: true });
     await download(urlClientCfg, fileClientCfg);
     await download(urlServices, fileServices);
     setMessage('info', 'Retrieved network assets');
@@ -112,24 +106,18 @@ export function Networks() {
     ////////////////////////////////////////////////////////////////////////
     if (!(await exists(fileWalletshield))) {
       setMessage('info', 'Downloading network client...');
-      await download(
-        urlWalletshield,
-        fileWalletshield,
-        ({ progressTotal, total }) => {
-          const percentComplete = Math.floor((progressTotal / total) * 100);
-          if (
-            (dlProgress !== percentComplete &&
-              percentComplete % updateInterval === 0) ||
-            progressTotal === total
-          ) {
-            let msg = `Downloading client... ${percentComplete}%`;
-            if (progressTotal === total)
-              msg = `Downloaded client for OS: ${platformArch}`;
-            setMessage('info', msg);
-            setDlProgress(() => percentComplete);
-          }
-        },
-      );
+      await download(urlWalletshield, fileWalletshield, ({ progressTotal, total }) => {
+        const percentComplete = Math.floor((progressTotal / total) * 100);
+        if (
+          (dlProgress !== percentComplete && percentComplete % updateInterval === 0) ||
+          progressTotal === total
+        ) {
+          let msg = `Downloading client... ${percentComplete}%`;
+          if (progressTotal === total) msg = `Downloaded client for OS: ${platformArch}`;
+          setMessage('info', msg);
+          setDlProgress(() => percentComplete);
+        }
+      });
     }
 
     ////////////////////////////////////////////////////////////////////////
@@ -137,13 +125,9 @@ export function Networks() {
     ////////////////////////////////////////////////////////////////////////
     if (platform() === 'linux' || platform() === 'macos') {
       log.debug(`executing command: chmod +x walletshield`);
-      const output = await Command.create(
-        'chmod-walletshield',
-        ['+x', 'walletshield'],
-        {
-          cwd: dirNetwork,
-        },
-      ).execute();
+      const output = await Command.create('chmod-walletshield', ['+x', 'walletshield'], {
+        cwd: dirNetwork,
+      }).execute();
       if (output.code !== 0) {
         throw new Error(`Failed to chmod+x walletshield: ${output.stderr}`);
       }
@@ -240,9 +224,7 @@ export function Networks() {
           </>
         ) : (
           <>
-            <p className="text-lg font-bold">
-              Connected Network: {networkConnected}
-            </p>
+            <p className="text-lg font-bold">Connected Network: {networkConnected}</p>
             <button onClick={disconnect} className="btn btn-secondary">
               Disconnect
             </button>

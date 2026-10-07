@@ -29,13 +29,10 @@ listen<number>('api_conn_close', (e) => {
   console.log('API client left', e.payload);
 });
 
-listen<{ conn_id: number; data: string }>(
-  'api_request',
-  async ({ payload }) => {
-    const reply = await handle(payload.data);
-    await invoke('api_reply', { connId: payload.conn_id, data: reply });
-  },
-);
+listen<{ conn_id: number; data: string }>('api_request', async ({ payload }) => {
+  const reply = await handle(payload.data);
+  await invoke('api_reply', { connId: payload.conn_id, data: reply });
+});
 
 export const enum RpcCode {
   PARSE = -32700,
@@ -77,10 +74,7 @@ async function handle(raw: string): Promise<string | void> {
   }
 
   if (req.jsonrpc !== '2.0' || typeof req.method !== 'string') {
-    return err(
-      req.id ?? null,
-      new RpcError(RpcCode.INVALID_REQUEST, 'Invalid request'),
-    );
+    return err(req.id ?? null, new RpcError(RpcCode.INVALID_REQUEST, 'Invalid request'));
   }
 
   const isNotification = req.id === undefined;
@@ -92,9 +86,7 @@ async function handle(raw: string): Promise<string | void> {
   } catch (e: any) {
     if (isNotification) return; // swallow notif errors
     const rpcErr =
-      e instanceof RpcError
-        ? e
-        : new RpcError(RpcCode.INTERNAL, 'Internal error', String(e));
+      e instanceof RpcError ? e : new RpcError(RpcCode.INTERNAL, 'Internal error', String(e));
     return err(req.id ?? null, rpcErr);
   }
 }

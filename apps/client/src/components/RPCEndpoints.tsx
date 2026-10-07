@@ -2,11 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useStore } from '../store';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 import * as log from '@tauri-apps/plugin-log';
-import {
-  NetworkServices,
-  getWalletshieldListenAddress,
-  readNetworkAssetFile,
-} from '../utils';
+import { NetworkServices, getWalletshieldListenAddress, readNetworkAssetFile } from '../utils';
 import { IconClipboard } from './icons';
 
 export function RPCEndpoints() {
@@ -28,10 +24,7 @@ export function RPCEndpoints() {
 
         // read services file of the connected network
         if (networkConnected) {
-          const f = await readNetworkAssetFile(
-            networkConnected,
-            'services.json',
-          );
+          const f = await readNetworkAssetFile(networkConnected, 'services.json');
           const s = JSON.parse(f) as NetworkServices;
           setServices(s);
         }
@@ -54,10 +47,7 @@ export function RPCEndpoints() {
       .filter((n) => includeTestnets || !n.isTestnet)
       .filter((n) => {
         const term = search.toLowerCase();
-        return (
-          n.chain.toLowerCase().includes(term) ||
-          n.network.toLowerCase().includes(term)
-        );
+        return n.chain.toLowerCase().includes(term) || n.network.toLowerCase().includes(term);
       });
   }, [includeTestnets, search, services]);
 
@@ -117,10 +107,7 @@ export function RPCEndpoints() {
                   className="flex items-center gap-x-1 hover:cursor-pointer"
                   onClick={() => handleCopy(n.rpcPath)}
                 >
-                  <IconClipboard
-                    className="size-5"
-                    withCheck={copied === n.rpcPath}
-                  />
+                  <IconClipboard className="size-5" withCheck={copied === n.rpcPath} />
                   {`${BASE_URL}${n.rpcPath}`}
                 </td>
               </tr>

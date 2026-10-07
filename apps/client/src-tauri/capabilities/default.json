@@ -55,12 +55,7 @@
         {
           "name": "walletshield-listen",
           "cmd": "walletshield",
-          "args": [
-            "-listen",
-            { "validator": "^(\\S*:\\d+)$" },
-            "-config",
-            "client.toml"
-          ],
+          "args": ["-listen", { "validator": "^(\\S*:\\d+)$" }, "-config", "client.toml"],
           "sidecar": false
         }
       ]

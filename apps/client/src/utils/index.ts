@@ -49,10 +49,7 @@ export const getNetworks = async () => {
   return entries.filter((i) => i.isDirectory).map((i) => i.name);
 };
 
-export const readNetworkAssetFile = async (
-  networkId: string,
-  asset: string,
-) => {
+export const readNetworkAssetFile = async (networkId: string, asset: string) => {
   const filePath = await path.join('networks', networkId, asset);
   return await readTextFile(filePath, { baseDir: BaseDirectory.AppLocalData });
 };

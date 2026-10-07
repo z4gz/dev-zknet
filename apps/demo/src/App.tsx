@@ -37,8 +37,7 @@ function App() {
         }),
       });
 
-      if (!r.ok)
-        throw new Error(`[demo] Fetch failed: ${r.status} ${r.statusText}`);
+      if (!r.ok) throw new Error(`[demo] Fetch failed: ${r.status} ${r.statusText}`);
 
       const data = await r.json();
       console.log('[demo] Fetch successful:', data);

@@ -20,15 +20,7 @@ export function Header() {
   };
 
   // SideBar nav item
-  const NavItem = ({
-    to,
-    icon,
-    label,
-  }: {
-    to: string;
-    icon: ReactElement;
-    label: string;
-  }) => (
+  const NavItem = ({ to, icon, label }: { to: string; icon: ReactElement; label: string }) => (
     <li>
       <Link to={to} onClick={handleLink}>
         <span className="text-primary">{icon}</span>
@@ -40,35 +32,18 @@ export function Header() {
   // https://v5.daisyui.com/components/drawer/#drawer-that-opens-from-right-side-of-page
   const SideBar = () => (
     <div className="drawer">
-      <input
-        id="my-drawer"
-        type="checkbox"
-        className="drawer-toggle"
-        ref={drawerRef}
-      />
+      <input id="my-drawer" type="checkbox" className="drawer-toggle" ref={drawerRef} />
       <div className="drawer-content">
-        <label
-          htmlFor="my-drawer"
-          tabIndex={0}
-          className="btn btn-ghost btn-circle drawer-button"
-        >
+        <label htmlFor="my-drawer" tabIndex={0} className="btn btn-ghost btn-circle drawer-button">
           <IconBars3 />
         </label>
       </div>
       <div className="drawer-side z-50">
-        <label
-          htmlFor="my-drawer"
-          aria-label="close sidebar"
-          className="drawer-overlay"
-        ></label>
+        <label htmlFor="my-drawer" aria-label="close sidebar" className="drawer-overlay"></label>
         <ul className="menu bg-base-200 text-base-content min-h-full w-40 p-4">
           <NavItem to="/" label="Networks" icon={<IconGlobe />} />
           <NavItem to="/settings" label="Settings" icon={<IconCog />} />
-          <NavItem
-            to="/walletshield"
-            label="WalletShield"
-            icon={<IconShieldCheck />}
-          />
+          <NavItem to="/walletshield" label="WalletShield" icon={<IconShieldCheck />} />
         </ul>
       </div>
     </div>

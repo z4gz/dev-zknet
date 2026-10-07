@@ -5,19 +5,12 @@ import { notifyAPIClientsOfStatusChange } from '../services/api';
 
 export function Settings() {
   const [listenAddress, setListenAddress] = useState('');
-  const [
-    defaultWalletshieldListenAddress,
-    setDefaultWalletshieldListenAddress,
-  ] = useState('');
+  const [defaultWalletshieldListenAddress, setDefaultWalletshieldListenAddress] = useState('');
 
-  const walletshieldListenAddress = useStore(
-    (s) => s.walletshieldListenAddress,
-  );
+  const walletshieldListenAddress = useStore((s) => s.walletshieldListenAddress);
 
   const setMessage = useStore((s) => s.setMessage);
-  const setWalletshieldListenAddress = useStore(
-    (s) => s.setWalletshieldListenAddress,
-  );
+  const setWalletshieldListenAddress = useStore((s) => s.setWalletshieldListenAddress);
 
   useEffect(() => {
     setListenAddress(walletshieldListenAddress);
@@ -61,17 +54,11 @@ export function Settings() {
             pattern="^((\d{1,3}\.){3}\d{1,3}|[a-zA-Z0-9.-]+)?:(\d{1,5})$"
             required
           />
-          <p className="fieldset-label">
-            Where the Walletshield listens for connections.
-          </p>
+          <p className="fieldset-label">Where the Walletshield listens for connections.</p>
         </fieldset>
         <div className="flex w-full h-full gap-4 p-4">
           <div className="tooltip flex-1" data-tip="Restore Defaults">
-            <button
-              type="button"
-              className="btn btn-secondary w-full"
-              onClick={handleReset}
-            >
+            <button type="button" className="btn btn-secondary w-full" onClick={handleReset}>
               Reset
             </button>
           </div>

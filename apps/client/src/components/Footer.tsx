@@ -20,9 +20,7 @@ export function Footer() {
   }, [updateStatus]);
 
   const isUpdaterVisible =
-    updaterVisibility ||
-    updateStatus === 'checked-updatable' ||
-    updateStatus === 'installed';
+    updaterVisibility || updateStatus === 'checked-updatable' || updateStatus === 'installed';
 
   const showUpdater = () =>
     updateStatus === 'error'

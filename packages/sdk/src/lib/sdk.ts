@@ -67,7 +67,6 @@ export class ZKNetSDK {
   }
 
   client = {
-    getState: async (): Promise<ZKNetClientState> =>
-      await this.link.client.getState(),
+    getState: async (): Promise<ZKNetClientState> => await this.link.client.getState(),
   };
 }

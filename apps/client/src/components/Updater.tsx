@@ -60,9 +60,7 @@ export function Updater() {
 
         case 'Progress':
           dlProgress.current += event.data.chunkLength;
-          setDlPercent(
-            Math.floor((dlProgress.current / dlTotal.current) * 100),
-          );
+          setDlPercent(Math.floor((dlProgress.current / dlTotal.current) * 100));
           break;
 
         case 'Finished':
@@ -129,21 +127,12 @@ export function Updater() {
             <span className="flex items-center gap-x-4">
               {msg}
               {status === 'checked-updatable' && (
-                <button
-                  onClick={handleUpdate}
-                  className="btn btn-sm btn-soft btn-accent mx-auto"
-                >
+                <button onClick={handleUpdate} className="btn btn-sm btn-soft btn-accent mx-auto">
                   Update Now
                 </button>
               )}
             </span>
-            {progress && (
-              <progress
-                className="progress progress-accent"
-                value={value}
-                max={max}
-              />
-            )}
+            {progress && <progress className="progress progress-accent" value={value} max={max} />}
           </div>
         )}
 
