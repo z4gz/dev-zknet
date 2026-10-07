@@ -1,0 +1,20 @@
+{
+  "extends": "./.wxt/tsconfig.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "jsx": "react-jsx",
+    "paths": {
+      "@zknet/sdk": ["../../packages/sdk/src/index.ts"],
+      "@zknet/sdk/*": ["../../packages/sdk/src/*"],
+      "@": ["."],
+      "@/*": ["./*"],
+      "~": ["."],
+      "~/*": ["./*"]
+    }
+  },
+  "references": [
+    {
+      "path": "../../packages/sdk"
+    }
+  ]
+}

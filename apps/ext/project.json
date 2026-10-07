@@ -1,0 +1,21 @@
+{
+  "name": "@zknet/ext",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "tags": [],
+  "targets": {
+    "build": {
+      "outputs": ["{projectRoot}/.output"]
+    },
+    "clean": {
+      "options": {
+        "commands": ["rm -vrf ./.output"]
+      },
+      "configurations": {
+        "very": {
+          "commands": ["rm -vrf ./.wxt", "rm -vrf ./node_modules"]
+        }
+      }
+    }
+  }
+}
