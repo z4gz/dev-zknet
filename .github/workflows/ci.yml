@@ -19,10 +19,10 @@ jobs:
           filter: tree:0
           fetch-depth: 0
 
+      # pnpm version comes from the root package.json packageManager field
       - uses: pnpm/action-setup@v6
         name: Install pnpm
         with:
-          version: 11.13.0
           run_install: false
 
       # This enables task distribution via Nx Cloud
@@ -40,8 +40,12 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # Derive affected base/head SHAs so format:check compares against the last green main
+      - uses: nrwl/nx-set-shas@v5
+
       # Prepend any command with "nx record --" to record its logs to Nx Cloud
       # - run: pnpm exec nx record -- echo Hello World
+      - run: pnpm exec nx format:check
       - run: pnpm exec nx run-many -t lint test build
       # Nx Cloud recommends fixes for failures to help you get CI green faster. Learn more: https://nx.dev/ci/features/self-healing-ci
       - run: pnpm exec nx fix-ci
