@@ -1,0 +1,10 @@
+
+[workspace]
+resolver = '2'
+# apps/client-cli and apps/client/src-tauri rejoin when apps/ lands
+members = [
+	'libs/rs-core',
+]
+
+[profile.release]
+lto = true
