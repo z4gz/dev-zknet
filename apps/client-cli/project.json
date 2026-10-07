@@ -1,62 +1,71 @@
 {
-  "name": "zknet_client_cli",
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "name": "zknet_client_cli",
   "projectType": "application",
   "sourceRoot": "apps/client-cli/src",
+  "tags": [],
+  "implicitDependencies": ["zknet_core"],
+  "namedInputs": {
+    "rustSources": [
+      "{projectRoot}/Cargo.toml",
+      "{projectRoot}/src/**/*.rs",
+      "{projectRoot}/assets/**/*"
+    ]
+  },
   "targets": {
     "build": {
+      "executor": "nx:run-commands",
       "cache": true,
-      "executor": "@monodon/rust:build",
-      "outputs": ["{options.target-dir}"],
+      "inputs": ["rustSources", "^rustSources", "cargoWorkspace"],
+      "outputs": ["{workspaceRoot}/dist/target/debug/zknet_client_cli"],
       "options": {
-        "target-dir": "dist/target/zknet_client_cli"
-      },
-      "configurations": {
-        "production": {
-          "release": true
-        }
+        "command": "cargo build --locked --target-dir dist/target -p zknet_client_cli"
       }
     },
-    "clean": {
-      "options": {
-        "commands": ["rm -vrf ../../dist/target/zknet_client_cli"]
-      }
-    },
-    "format": {},
-    "format:check": {},
     "test": {
+      "executor": "nx:run-commands",
       "cache": true,
-      "executor": "@monodon/rust:test",
-      "outputs": ["{options.target-dir}"],
+      "inputs": ["rustSources", "^rustSources", "cargoWorkspace"],
       "options": {
-        "target-dir": "dist/target/zknet_client_cli"
-      },
-      "configurations": {
-        "production": {
-          "release": true
-        }
+        "command": "cargo test --locked --target-dir dist/target -p zknet_client_cli"
       }
     },
     "lint": {
+      "executor": "nx:run-commands",
       "cache": true,
-      "executor": "@monodon/rust:lint",
-      "outputs": ["{options.target-dir}"],
+      "inputs": ["rustSources", "^rustSources", "cargoWorkspace"],
       "options": {
-        "target-dir": "dist/target/zknet_client_cli"
+        "command": "cargo clippy --locked --target-dir dist/target -p zknet_client_cli --all-targets"
+      }
+    },
+    "format": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "cargo fmt -p zknet_client_cli"
+      }
+    },
+    "format:check": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["rustSources"],
+      "options": {
+        "command": "cargo fmt -p zknet_client_cli -- --check"
       }
     },
     "run": {
-      "executor": "@monodon/rust:run",
-      "outputs": ["{options.target-dir}"],
+      "executor": "nx:run-commands",
+      "cache": false,
       "options": {
-        "target-dir": "dist/target/zknet_client_cli"
-      },
-      "configurations": {
-        "production": {
-          "release": true
-        }
+        "command": "cargo run --locked --target-dir dist/target -p zknet_client_cli --"
+      }
+    },
+    "clean": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "cargo clean --target-dir dist/target -p zknet_client_cli"
       }
     }
-  },
-  "tags": []
+  }
 }

@@ -1,0 +1,65 @@
+{
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "name": "zkn-client",
+  "projectType": "application",
+  "sourceRoot": "apps/client/src-tauri/src",
+  "tags": [],
+  "implicitDependencies": ["@zknet/client"],
+  "namedInputs": {
+    "rustSources": [
+      "{projectRoot}/Cargo.toml",
+      "{projectRoot}/build.rs",
+      "{projectRoot}/src/**/*.rs",
+      "{projectRoot}/tauri.conf.json",
+      "{projectRoot}/capabilities/**/*",
+      "{projectRoot}/icons/**/*"
+    ]
+  },
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "cargo build --locked --target-dir dist/target -p zkn-client"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["rustSources", "cargoWorkspace"],
+      "options": {
+        "command": "cargo test --locked --target-dir dist/target -p zkn-client"
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["rustSources", "cargoWorkspace"],
+      "options": {
+        "command": "cargo clippy --locked --target-dir dist/target -p zkn-client --all-targets"
+      }
+    },
+    "format": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "cargo fmt -p zkn-client"
+      }
+    },
+    "format:check": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["rustSources"],
+      "options": {
+        "command": "cargo fmt -p zkn-client -- --check"
+      }
+    },
+    "clean": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "cargo clean --target-dir dist/target -p zkn-client"
+      }
+    }
+  }
+}
