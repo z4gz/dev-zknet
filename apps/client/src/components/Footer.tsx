@@ -17,6 +17,7 @@ export function Footer() {
       const timer = setTimeout(() => setUpdaterVisibility(false), 3000);
       return () => clearTimeout(timer); // Cleanup on unmount
     }
+    return undefined;
   }, [updateStatus]);
 
   const isUpdaterVisible =

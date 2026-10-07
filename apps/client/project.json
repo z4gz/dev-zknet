@@ -7,10 +7,20 @@
     "build": {
       "outputs": ["{projectRoot}/dist"]
     },
-    "dev": {
-      "executor": "nx:run-script",
+    "desktop-dev": {
+      "executor": "nx:run-commands",
+      "cache": false,
       "options": {
-        "script": "tauri dev"
+        "command": "pnpm tauri dev",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "desktop-build": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "pnpm tauri build",
+        "cwd": "{projectRoot}"
       }
     }
   }
