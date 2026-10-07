@@ -2,7 +2,6 @@ packages:
   - apps/*
   - libs/*
   - packages/*
-  - libs
 allowBuilds:
   nx: true
   esbuild: false
