@@ -1,3 +1,7 @@
+packages:
+  - apps/*
+  - libs/*
+  - packages/*
+allowBuilds:
+  nx: true
 autoInstallPeers: true
-onlyBuiltDependencies:
-  - nx

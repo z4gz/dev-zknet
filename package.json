@@ -10,5 +10,6 @@
     "@nx/workspace": "23.2.1",
     "nx": "23.2.1",
     "oxfmt": "^0.60.0"
-  }
+  },
+  "packageManager": "pnpm@11.13.0"
 }
