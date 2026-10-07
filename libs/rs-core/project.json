@@ -1,44 +1,62 @@
 {
-  "name": "zknet_core",
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "name": "zknet_core",
   "projectType": "library",
   "sourceRoot": "libs/rs-core/src",
+  "tags": [],
+  "namedInputs": {
+    "rustSources": [
+      "{projectRoot}/Cargo.toml",
+      "{projectRoot}/src/**/*.rs",
+      "{projectRoot}/tests/**/*.rs"
+    ]
+  },
   "targets": {
     "build": {
-      "executor": "@monodon/rust:check",
-      "outputs": ["{options.target-dir}"],
-      "options": {
-        "target-dir": "dist/target/zknet_core"
-      }
-    },
-    "clean": {
-      "options": {
-        "commands": ["rm -vrf ../../dist/target/zknet_core"]
-      }
-    },
-    "format": {},
-    "format:check": {},
-    "test": {
+      "executor": "nx:run-commands",
       "cache": true,
-      "executor": "@monodon/rust:test",
-      "outputs": ["{options.target-dir}"],
+      "inputs": ["rustSources", "cargoWorkspace"],
       "options": {
-        "target-dir": "dist/target/zknet_core"
-      },
-      "configurations": {
-        "production": {
-          "release": true
-        }
+        "command": "cargo check --locked -p zknet_core --all-targets"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["rustSources", "cargoWorkspace"],
+      "options": {
+        "command": "cargo test --locked -p zknet_core"
       }
     },
     "lint": {
+      "executor": "nx:run-commands",
       "cache": true,
-      "executor": "@monodon/rust:lint",
-      "outputs": ["{options.target-dir}"],
+      "inputs": ["rustSources", "cargoWorkspace"],
       "options": {
-        "target-dir": "dist/target/zknet_core"
+        "command": "cargo clippy --locked -p zknet_core --all-targets"
+      }
+    },
+    "format": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "cargo fmt -p zknet_core"
+      }
+    },
+    "format:check": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["rustSources", "cargoWorkspace"],
+      "options": {
+        "command": "cargo fmt -p zknet_core -- --check"
+      }
+    },
+    "clean": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "cargo clean -p zknet_core"
       }
     }
-  },
-  "tags": []
+  }
 }

@@ -14,6 +14,12 @@
       "{workspaceRoot}/packages/opt/go.mod",
       "{workspaceRoot}/packages/opt/go.sum",
       "{workspaceRoot}/packages/opt/Makefile"
+    ],
+    "cargoWorkspace": [
+      "{workspaceRoot}/Cargo.toml",
+      "{workspaceRoot}/Cargo.lock",
+      "{workspaceRoot}/.cargo/config.toml",
+      "{workspaceRoot}/rust-toolchain.toml"
     ]
   },
   "plugins": [
