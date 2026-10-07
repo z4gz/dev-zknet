@@ -1,8 +1,9 @@
 
 [workspace]
 resolver = '2'
-# apps/client-cli and apps/client/src-tauri rejoin when apps/ lands
 members = [
+	'apps/client-cli',
+	'apps/client/src-tauri',
 	'libs/rs-core',
 ]
 
