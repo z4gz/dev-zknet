@@ -13,12 +13,17 @@ pnpm nx show projects
 
 Four Nx projects define the active Go and Make workflows:
 
-| Project        | Root                                                  | Targets                                                          |
-| -------------- | ----------------------------------------------------- | ---------------------------------------------------------------- |
-| `opt-common`   | `packages/opt/common`                                 | `test`                                                           |
-| `http-proxy`   | `packages/opt/server_plugins/cbor_plugins/http_proxy` | `build`                                                          |
-| `walletshield` | `packages/opt/apps/walletshield`                      | `build`, `dev-remote`                                            |
+| Project        | Root                                                  | Targets                                                                              |
+| -------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `opt-common`   | `packages/opt/common`                                 | `test`                                                                               |
+| `http-proxy`   | `packages/opt/server_plugins/cbor_plugins/http_proxy` | `build`                                                                              |
+| `walletshield` | `packages/opt/apps/walletshield`                      | `build`, `dev-remote`                                                                |
 | `mixnet`       | `packages/opt/docker`                                 | `start`, `ready`, `probe`, `serve`, `e2e-rpc`, `e2e-rpc-matrix`, `stop`, `dev-local` |
+
+The clients run against that mixnet through `network-assets` (`apps/network-assets`:
+`stage`, `serve`, `ready`, `test`), which assembles a network's assets in the clients' download
+layout and serves them to `zknet_client_cli:dev-local` and `@zknet/client:desktop-dev-local`.
+See [Run the clients locally](#run-the-clients-locally).
 
 `http-proxy` is one project for a library plus its `cmd/http_proxy` binary, not one per
 file.
@@ -119,6 +124,21 @@ avoids retagging an image someone else built. The default is `alpine`.
 > `$(MAKE)`, which GNU make executes even under `-n`, and `clone-katzenpost` really
 > clones. Likewise `make clean` runs `rm -rf $(katzenpost_dir)` — it deletes the
 > Katzenpost checkout, which is why no Nx target wraps it.
+
+## Run the clients locally
+
+With the local mixnet running (`mixnet:start`, `mixnet:ready`), each client target stages
+and serves that network's assets on `127.0.0.1:8765`, then connects in WalletShield thin
+mode through the host-exposed client daemon:
+
+```sh
+pnpm nx run zknet_client_cli:dev-local         # headless; WalletShield on :7070
+pnpm nx run @zknet/client:desktop-dev-local    # desktop; connect to network id `dev-local`
+```
+
+Ctrl-C stops the client, its WalletShield and the asset server. Here the asset server is
+an Nx `continuous` task, which suits a plain process: the dependents' explicit `ready` probe
+supplies the readiness gate Nx lacks. Details: `apps/network-assets/README.md`.
 
 ## Run against a remote mixnet
 
