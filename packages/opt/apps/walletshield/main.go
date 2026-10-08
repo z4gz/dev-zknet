@@ -176,6 +176,9 @@ func main() {
 	if !thinClientOnly {
 		cfg, err := config.LoadFile(configPath)
 		if err != nil {
+			if _, thinErr := thin.LoadFile(configPath); thinErr == nil {
+				err = fmt.Errorf("%w: %s is a thin client config, which requires -thin", err, configPath)
+			}
 			panic(err)
 		}
 
