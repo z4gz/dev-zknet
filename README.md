@@ -140,6 +140,13 @@ Ctrl-C stops the client, its WalletShield and the asset server. Here the asset s
 an Nx `continuous` task, which suits a plain process: the dependents' explicit `ready` probe
 supplies the readiness gate Nx lacks. Details: `apps/network-assets/README.md`.
 
+For the browser path, keep the desktop client connected, build the extension with
+`pnpm nx run @zknet/ext:build`, load `apps/ext/.output/chrome-mv3/` as an unpacked
+extension in a Chromium development profile, and run `pnpm nx run @zknet/demo:serve`.
+Exercise a demo RPC request and observe the response through the SDK → extension →
+desktop control API → WalletShield. This is a local integration check, not proof
+of a deployed mixnet or signed distribution.
+
 ## Run against a remote mixnet
 
 ```sh
