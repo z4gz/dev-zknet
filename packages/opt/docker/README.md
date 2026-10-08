@@ -12,6 +12,10 @@ There are two Makefiles available, each corresponding to a different PKI.
 - **`Makefile`:** (Default) Manages a local test network using Katzenpost’s voting PKI.
 - **`Makefile.appchain`:** Uses ZKN’s ZKAppChain PKI.
 
+`services.json` is the network's client service manifest: the RPC paths the clients offer, each of
+which the `rpc_proxy` must route. The network assets publish it, and `mixnet:e2e-rpc` tests exactly
+its paths.
+
 ## Voting PKI
 
 This setup, managed by the default `Makefile`, covers ZKN-specifics and proxies other targets to

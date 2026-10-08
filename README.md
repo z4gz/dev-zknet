@@ -78,7 +78,7 @@ pnpm nx run mixnet:start             # clone Katzenpost if needed, build, compos
 pnpm nx run mixnet:ready             # bounded readiness: upstream `wait`, under `timeout` (~1 min)
 pnpm nx run mixnet:probe             # WalletShield mixnet round-trip probe
 pnpm nx run mixnet:serve             # WalletShield client, listening on :7070
-pnpm nx run mixnet:e2e-rpc           # /ethereum, /polygon, /bsc through the proxy to real RPC
+pnpm nx run mixnet:e2e-rpc           # the clients' services.json paths through the proxy to real RPC
 pnpm nx run mixnet:e2e-rpc-matrix    # diagnostic sweep of all configured RPC fixtures
 pnpm nx run mixnet:stop              # stop the client and the compose project
 ```

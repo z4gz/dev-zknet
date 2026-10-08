@@ -1,0 +1,48 @@
+{
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "name": "network-assets",
+  "projectType": "application",
+  "implicitDependencies": ["walletshield"],
+  "targets": {
+    "stage": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "./assemble.sh dev-local \"${katzenpost_dir:-/tmp/katzenpost.opt}/docker/mixnet-${distro:-alpine}/client/thinclient.toml\"",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "serve": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "continuous": true,
+      "dependsOn": ["stage"],
+      "options": {
+        "command": "python3 server.py serve",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "ready": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "python3 server.py ready",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": [
+        "{projectRoot}/*.py",
+        "{projectRoot}/*.sh",
+        "{workspaceRoot}/packages/opt/docker/services.json",
+        "{workspaceRoot}/apps/client/src-tauri/*.json"
+      ],
+      "options": {
+        "command": "python3 -B -m unittest -v",
+        "cwd": "{projectRoot}"
+      }
+    }
+  }
+}

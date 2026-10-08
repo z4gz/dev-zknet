@@ -1,0 +1,25 @@
+{
+  "RPCEndpoints": [
+    {
+      "chain": "Ethereum",
+      "network": "Mainnet",
+      "chainId": 1,
+      "rpcPath": "/ethereum",
+      "isTestnet": false
+    },
+    {
+      "chain": "Polygon",
+      "network": "Mainnet",
+      "chainId": 137,
+      "rpcPath": "/polygon",
+      "isTestnet": false
+    },
+    {
+      "chain": "BSC",
+      "network": "Mainnet",
+      "chainId": 56,
+      "rpcPath": "/bsc",
+      "isTestnet": false
+    }
+  ]
+}
