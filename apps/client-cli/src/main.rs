@@ -12,6 +12,12 @@ const CONFIG_JSON: &str = include_str!("../assets/config.json");
 struct Cli {
     /// The ID of the network to connect to
     network_id: String,
+    /// Download network assets from this base URL instead of the configured one
+    #[arg(long)]
+    network_url: Option<String>,
+    /// Run WalletShield as a thin client of an already running local client daemon
+    #[arg(long)]
+    thin: bool,
 }
 
 #[tokio::main]
@@ -22,7 +28,11 @@ async fn main() -> Result<()> {
     let platform_arch = get_platform_arch().expect("Unsupported platform or architecture");
     println!("Starting {app_name} v{VERSION} on {platform_arch}");
 
-    let ctx = AppContext::new(&app_name, CONFIG_JSON, platform_arch);
+    let mut ctx = AppContext::new(&app_name, CONFIG_JSON, platform_arch);
+    if let Some(url) = cli.network_url {
+        ctx.config.url_network = url;
+    }
+    ctx.config.walletshield_thin |= cli.thin;
     println!("App data directory: {}", ctx.paths.dir_data().display());
     println!("Using configuration: {:#?}", ctx.config);
 

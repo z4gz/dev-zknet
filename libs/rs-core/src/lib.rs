@@ -36,7 +36,11 @@ impl DlCtx {
             }) as ProgressCallback
         });
 
-        download(&self.client, &url, &mut file, progress, None, None).await?;
+        if let Err(error) = download(&self.client, &url, &mut file, progress, None, None).await {
+            drop(file);
+            let _ = tokio::fs::remove_file(&path).await; // leave no truncated asset behind
+            return Err(error.context(format!("failed to download {url}")));
+        }
 
         if is_binary {
             let platform = self.platform_arch.split('-').next().unwrap_or("");
@@ -64,6 +68,20 @@ impl DlCtx {
     }
 }
 
+/// WalletShield's arguments, run from the network directory holding `client.toml`.
+fn walletshield_args(config: &crate::config::AppConfig) -> Vec<String> {
+    let mut args = vec![
+        "-listen".into(),
+        config.walletshield_listen_address.clone(),
+        "-config".into(),
+        "client.toml".into(),
+    ];
+    if config.walletshield_thin {
+        args.push("-thin".into());
+    }
+    args
+}
+
 /// Start the client for the specified network from the downloaded assets.
 async fn start_network_client(ctx: crate::context::AppContext, network_id: &str) -> Result<()> {
     let dir_network = ctx.paths.dir_data().join("networks").join(network_id);
@@ -88,9 +106,7 @@ async fn start_network_client(ctx: crate::context::AppContext, network_id: &str)
     command.stdout(std::process::Stdio::piped());
     command.stderr(std::process::Stdio::piped());
 
-    command.arg("-listen");
-    command.arg(ctx.config.walletshield_listen_address);
-    command.arg("-config").arg("client.toml");
+    command.args(walletshield_args(&ctx.config));
 
     println!("Starting network client...");
     let mut child = command.spawn()?;
@@ -184,9 +200,27 @@ pub async fn network_connect(ctx: crate::context::AppContext, network_id: &str) 
 
 #[cfg(test)]
 mod tests {
+    use super::walletshield_args;
+    use crate::config::AppConfig;
+
+    fn config(walletshield_thin: bool) -> AppConfig {
+        AppConfig {
+            api_listen_address: "127.0.0.1:7000".into(),
+            url_network: "http://127.0.0.1:8765".into(),
+            walletshield_listen_address: ":7070".into(),
+            walletshield_thin,
+        }
+    }
+
     #[test]
-    fn it_works() {
-        let result = 2 + 2;
-        assert_eq!(result, 4);
+    fn walletshield_args_select_thin_mode() {
+        assert_eq!(
+            walletshield_args(&config(false)),
+            ["-listen", ":7070", "-config", "client.toml"]
+        );
+        assert_eq!(
+            walletshield_args(&config(true)),
+            ["-listen", ":7070", "-config", "client.toml", "-thin"]
+        );
     }
 }
