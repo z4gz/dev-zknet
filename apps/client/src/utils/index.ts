@@ -9,6 +9,7 @@ export interface ZKNetClientCfg {
   apiListenAddress: string;
   defaultWalletshieldListenAddress: string;
   urlNetwork: string;
+  walletshieldThin: boolean;
 }
 
 export const getZKNetClientCfg = async (): Promise<ZKNetClientCfg> => {

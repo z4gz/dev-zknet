@@ -9,6 +9,7 @@ import { download } from '@tauri-apps/plugin-upload';
 import { useStore } from '../store';
 import { notifyAPIClientsOfStatusChange } from '../services/api';
 import { getNetworks, getWalletshieldListenAddress, getZKNetClientCfg } from '../utils';
+import { walletshieldSpawn } from '../utils/walletshield';
 
 export function Networks() {
   const [dlProgress, setDlProgress] = useState(0);
@@ -65,7 +66,7 @@ export function Networks() {
   }
 
   async function clientStart() {
-    const { urlNetwork } = await getZKNetClientCfg();
+    const { urlNetwork, walletshieldThin } = await getZKNetClientCfg();
 
     const urlClientCfg = `${urlNetwork}/${networkId}/client.toml`;
     const urlServices = `${urlNetwork}/${networkId}/services.json`;
@@ -104,7 +105,9 @@ export function Networks() {
     ////////////////////////////////////////////////////////////////////////
     // save the network's walletshield binary
     ////////////////////////////////////////////////////////////////////////
-    if (!(await exists(fileWalletshield))) {
+    // A thin-mode network is a local development build: its binary changes with
+    // every rebuild, so a cached copy would be stale.
+    if (walletshieldThin || !(await exists(fileWalletshield))) {
       setMessage('info', 'Downloading network client...');
       await download(urlWalletshield, fileWalletshield, ({ progressTotal, total }) => {
         const percentComplete = Math.floor((progressTotal / total) * 100);
@@ -139,8 +142,8 @@ export function Networks() {
     setMessage('info', 'Starting network client...');
     const cmd = 'walletshield';
     const wla = await getWalletshieldListenAddress();
-    const args = ['-listen', wla, '-config', 'client.toml'];
-    const command = Command.create('walletshield-listen', args, {
+    const { scope, args } = walletshieldSpawn(wla, walletshieldThin);
+    const command = Command.create(scope, args, {
       cwd: dirNetwork,
       env: {
         PATH: dirNetwork,

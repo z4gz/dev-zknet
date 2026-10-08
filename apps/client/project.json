@@ -15,6 +15,15 @@
         "cwd": "{projectRoot}"
       }
     },
+    "desktop-dev-local": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "dependsOn": ["network-assets:serve"],
+      "options": {
+        "command": "python3 ../network-assets/server.py ready && pnpm tauri dev --config src-tauri/tauri.dev-local.conf.json",
+        "cwd": "{projectRoot}"
+      }
+    },
     "desktop-build": {
       "executor": "nx:run-commands",
       "cache": false,
