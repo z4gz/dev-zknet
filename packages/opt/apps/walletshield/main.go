@@ -84,6 +84,10 @@ type Server struct {
 	log    *log.Logger
 	daemon *client.Daemon
 	thin   *thin.ThinClient
+
+	// send carries one serialized HTTP request over the mixnet and returns the
+	// raw reply.
+	send func(httpRequestBytes []byte) ([]byte, error)
 }
 
 // setListenAddress overrides the address of the client daemon's configured
@@ -133,6 +137,7 @@ func main() {
 	var testProbeResponseDelay int
 	var testProbeSendDelay int
 	var thinClientOnly bool
+	var corsOrigins string
 
 	flag.StringVar(&configPath, "config", "", "file path of the client configuration TOML file")
 	flag.IntVar(&delayStart, "delay_start", 0, "max random seconds to delay start")
@@ -145,7 +150,13 @@ func main() {
 	flag.IntVar(&testProbeSendDelay, "probe_send_delay", 10, "test probe delay between probes")
 	flag.IntVar(&timeout, "timeout", timeout, "seconds to wait for a request")
 	flag.BoolVar(&thinClientOnly, "thin", false, "use thin client mode (connect to existing daemon)")
+	flag.StringVar(&corsOrigins, "cors_origins", "", "comma-separated browser origins allowed to read responses; \"null\" admits every sandboxed frame")
 	flag.Parse()
+
+	cors, err := parseCORSOrigins(corsOrigins)
+	if err != nil {
+		panic(err)
+	}
 
 	if listenAddr == "" && !testProbe {
 		panic("listen flag must be set")
@@ -231,12 +242,13 @@ func main() {
 		thin:   thin,
 		daemon: d,
 	}
+	server.send = func(b []byte) ([]byte, error) { return sendRequest(thin, b) }
 
 	if testProbe {
 		server.SendTestProbes(testProbeSendDelay, testProbeCount, testProbeResponseDelay)
 		d.Shutdown()
 	} else {
-		http.HandleFunc("/", server.Handler)
+		http.HandleFunc("/", cors.wrap(server.Handler))
 		err := http.ListenAndServe(listenAddr, nil)
 		if err != nil {
 			// Check if the error is related to the port being in use
@@ -265,7 +277,7 @@ func (s *Server) Handler(w http.ResponseWriter, req *http.Request) {
 
 	s.log.Debugf("RAW HTTP REQUEST:\n%s", string(buf.Bytes()))
 
-	rawReply, err := sendRequest(s.thin, buf.Bytes())
+	rawReply, err := s.send(buf.Bytes())
 	if err != nil {
 		s.log.Errorf("Failed to send message: %s", err)
 		// Check if it's a payload size error

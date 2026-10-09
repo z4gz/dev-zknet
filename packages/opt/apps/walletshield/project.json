@@ -4,6 +4,15 @@
   "projectType": "application",
   "implicitDependencies": ["opt-common", "http-proxy"],
   "targets": {
+    "test": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["{projectRoot}/**/*.go", "^default", "optModule"],
+      "options": {
+        "command": "go test ./...",
+        "cwd": "{projectRoot}"
+      }
+    },
     "build": {
       "executor": "nx:run-commands",
       "cache": true,
