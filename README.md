@@ -160,11 +160,9 @@ defaulting. `ws_listen` (default `:7070`), `log_level` and `ws_extra_flags` are 
 overrides.
 
 **Browser callers.** WalletShield answers CORS preflights itself and never sends them over
-the mixnet. By default it lets no web origin read its replies. `-cors_origins` lists exact
-origins that may, for example `ws_extra_flags='-cors_origins http://localhost:5173'`.
-Wildcards are refused. `null` must be listed explicitly. That is the origin of sandboxed
-frames such as an anon-rpc worker, but any page can create such a frame, so listing `null`
-lets every website you visit use and read this proxy.
+the mixnet. It allows every origin (`Access-Control-Allow-Origin: *`), including `null`
+(sandboxed frames such as an anon-rpc worker), so any website you visit can use and read
+this local proxy. Restricting origins is future work.
 
 ## Conventions
 

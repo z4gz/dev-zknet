@@ -137,7 +137,6 @@ func main() {
 	var testProbeResponseDelay int
 	var testProbeSendDelay int
 	var thinClientOnly bool
-	var corsOrigins string
 
 	flag.StringVar(&configPath, "config", "", "file path of the client configuration TOML file")
 	flag.IntVar(&delayStart, "delay_start", 0, "max random seconds to delay start")
@@ -150,13 +149,7 @@ func main() {
 	flag.IntVar(&testProbeSendDelay, "probe_send_delay", 10, "test probe delay between probes")
 	flag.IntVar(&timeout, "timeout", timeout, "seconds to wait for a request")
 	flag.BoolVar(&thinClientOnly, "thin", false, "use thin client mode (connect to existing daemon)")
-	flag.StringVar(&corsOrigins, "cors_origins", "", "comma-separated browser origins allowed to read responses; \"null\" admits every sandboxed frame")
 	flag.Parse()
-
-	cors, err := parseCORSOrigins(corsOrigins)
-	if err != nil {
-		panic(err)
-	}
 
 	if listenAddr == "" && !testProbe {
 		panic("listen flag must be set")
@@ -248,7 +241,7 @@ func main() {
 		server.SendTestProbes(testProbeSendDelay, testProbeCount, testProbeResponseDelay)
 		d.Shutdown()
 	} else {
-		http.HandleFunc("/", cors.wrap(server.Handler))
+		http.HandleFunc("/", withCORS(server.Handler))
 		err := http.ListenAndServe(listenAddr, nil)
 		if err != nil {
 			// Check if the error is related to the port being in use
