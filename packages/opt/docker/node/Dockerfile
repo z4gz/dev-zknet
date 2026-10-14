@@ -12,7 +12,6 @@ RUN \
 FROM base AS builder
 
 ARG ENABLE_COMPRESSION=false
-ARG ENABLE_WARPED_EPOCH=false
 ARG KATZENPOST_DIR=/src/katzenpost
 # must satisfy the `go` directive of both go.mod files (this repo's is the
 # higher of the two), otherwise the toolchain is downloaded at build time
@@ -21,7 +20,7 @@ ARG VERSION_GO=1.26.8
 ENV GOROOT=/usr/local/go
 ENV PATH=$GOROOT/bin:$PATH
 ENV GOCACHE=/root/.cache/go-build
-ENV GO_BUILD_OPTS="-trimpath -ldflags=-buildid= -ldflags=-X=github.com/katzenpost/katzenpost/core/epochtime.WarpedEpoch=${ENABLE_WARPED_EPOCH} -ldflags=-X=github.com/ZeroKnowledgeNetwork/opt/common.CompressionEnabled=${ENABLE_COMPRESSION}"
+ENV GO_BUILD_OPTS="-trimpath -ldflags=-buildid= -ldflags=-X=github.com/ZeroKnowledgeNetwork/opt/common.CompressionEnabled=${ENABLE_COMPRESSION}"
 
 # Install build dependencies
 RUN \

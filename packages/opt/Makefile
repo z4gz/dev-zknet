@@ -1,6 +1,5 @@
 compression?=true
-warped?=true
-ldflags="-X github.com/katzenpost/katzenpost/core/epochtime.WarpedEpoch=${warped} -X github.com/ZeroKnowledgeNetwork/opt/common.CompressionEnabled=${compression}"
+ldflags="-X github.com/ZeroKnowledgeNetwork/opt/common.CompressionEnabled=${compression}"
 
 .PHONY: all app-walletshield genconfig http_proxy pki clean
 

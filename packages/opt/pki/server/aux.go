@@ -32,17 +32,17 @@ const (
 // Parts of katzenpost use MixPublishDeadline and PublishConsensusDeadline defined in
 // katzenpost:authority/voting/server/state.go
 // So, we preserve that aspect of the epoch schedule.
-var (
-	// MixPublishDeadline       = epochtime.Period * 1 / 8 // Do NOT change this
-	DescriptorBlockDeadline = epochtime.Period * 2 / 8
-	// AuthorityVoteDeadline    = epochtime.Period * 3 / 8
-	// PublishConsensusDeadline = epochtime.Period * 5 / 8 // Do NOT change this
-	DocGenerationDeadline = epochtime.Period * 7 / 8 // Do NOT change this (see katzenpost:authority/voting/server/state.go:documentForEpoch)
-)
+// MixPublishDeadline       = epochtime.Period() * 1 / 8 // Do NOT change this
+func DescriptorBlockDeadline() time.Duration { return epochtime.Period() * 2 / 8 }
 
-var (
-	JitterMax = epochtime.Period * 1 / 16 // max duration to distribute network load across synchronized nodes
-)
+// AuthorityVoteDeadline    = epochtime.Period() * 3 / 8
+// PublishConsensusDeadline = epochtime.Period() * 5 / 8 // Do NOT change this
+
+// Do NOT change this (see katzenpost:authority/voting/server/state.go:documentForEpoch)
+func DocGenerationDeadline() time.Duration { return epochtime.Period() * 7 / 8 }
+
+// max duration to distribute network load across synchronized nodes
+func JitterMax() time.Duration { return epochtime.Period() * 1 / 16 }
 
 func (s *state) fsm() <-chan time.Time {
 	s.Lock()
@@ -56,7 +56,7 @@ func (s *state) fsm() <-chan time.Time {
 		s.genesisEpoch = 0
 		s.backgroundFetchConsensus(epoch - 1)
 		s.backgroundFetchConsensus(epoch)
-		if elapsed > MixPublishDeadline {
+		if elapsed > MixPublishDeadline() {
 			s.zlog.Errorf("Too late to vote this round, sleeping until %s", nextEpoch)
 			sleep = nextEpoch
 			s.votingEpoch = epoch + 2
@@ -64,7 +64,7 @@ func (s *state) fsm() <-chan time.Time {
 		} else {
 			s.votingEpoch = epoch + 1
 			s.state = stateDescriptorSend
-			sleep = MixPublishDeadline - elapsed + s.zkpki_jitter()
+			sleep = MixPublishDeadline() - elapsed + s.zkpki_jitter()
 			if sleep < 0 {
 				sleep = 0
 			}
@@ -81,7 +81,7 @@ func (s *state) fsm() <-chan time.Time {
 			s.zlog.Errorf("❌ No descriptor for epoch %d", s.votingEpoch)
 		}
 		s.state = stateAcceptDescriptor
-		sleep = DescriptorBlockDeadline - elapsed + s.zkpki_jitter()
+		sleep = DescriptorBlockDeadline() - elapsed + s.zkpki_jitter()
 
 	case stateAcceptDescriptor:
 		doc, err := s.getVote(s.votingEpoch)
@@ -92,20 +92,20 @@ func (s *state) fsm() <-chan time.Time {
 		}
 		s.state = stateAcceptVote
 		_, nowelapsed, _ := epochtime.Now()
-		sleep = AuthorityVoteDeadline - nowelapsed
+		sleep = AuthorityVoteDeadline() - nowelapsed
 
 	case stateAcceptVote:
 		s.backgroundFetchConsensus(s.votingEpoch)
 		s.state = stateConfirmConsensus
 		_, nowelapsed, _ := epochtime.Now()
-		sleep = PublishConsensusDeadline - nowelapsed
+		sleep = PublishConsensusDeadline() - nowelapsed
 
 	case stateConfirmConsensus:
 		// See if consensus doc was retrieved from the appchain
 		_, ok := s.documents[epoch+1]
 		if ok {
 			s.state = stateDescriptorSend
-			sleep = MixPublishDeadline + nextEpoch + s.zkpki_jitter()
+			sleep = MixPublishDeadline() + nextEpoch + s.zkpki_jitter()
 			s.votingEpoch++
 		} else {
 			s.zlog.Error("No document for epoch %v", epoch+1)
@@ -176,7 +176,7 @@ func (s *state) zkpki_configuredReplicas() ([]uint8, [][]byte) {
 
 // Returns a random delay to distribute load across synchronized nodes
 func (s *state) zkpki_jitter() time.Duration {
-	return time.Duration(rand.NewMath().Float64() * float64(JitterMax))
+	return time.Duration(rand.NewMath().Float64() * float64(JitterMax()))
 }
 
 func (s *state) zkpki_submitDescriptor(desc *pki.MixDescriptor, epoch uint64) {
@@ -259,13 +259,13 @@ func (s *state) zkpki_getVote(epoch uint64) (*pki.Document, error) {
 func zkpki_newState(st *state) error {
 	st.zlog = st.s.logBackend.GetLogger("state/zkpki")
 
-	st.zlog.Debugf("State initialized with epoch Period: %s", epochtime.Period)
-	st.zlog.Debugf("State initialized with JitterMax: %s", JitterMax)
-	st.zlog.Debugf("State initialized with MixPublishDeadline: %s", MixPublishDeadline)
-	st.zlog.Debugf("State initialized with DescriptorBlockDeadline: %s", DescriptorBlockDeadline)
-	st.zlog.Debugf("State initialized with AuthorityVoteDeadline: %s", AuthorityVoteDeadline)
-	st.zlog.Debugf("State initialized with PublishConsensusDeadline: %s", PublishConsensusDeadline)
-	st.zlog.Debugf("State initialized with DocGenerationDeadline: %s", DocGenerationDeadline)
+	st.zlog.Debugf("State initialized with epoch Period: %s", epochtime.Period())
+	st.zlog.Debugf("State initialized with JitterMax: %s", JitterMax())
+	st.zlog.Debugf("State initialized with MixPublishDeadline: %s", MixPublishDeadline())
+	st.zlog.Debugf("State initialized with DescriptorBlockDeadline: %s", DescriptorBlockDeadline())
+	st.zlog.Debugf("State initialized with AuthorityVoteDeadline: %s", AuthorityVoteDeadline())
+	st.zlog.Debugf("State initialized with PublishConsensusDeadline: %s", PublishConsensusDeadline())
+	st.zlog.Debugf("State initialized with DocGenerationDeadline: %s", DocGenerationDeadline())
 
 	// Init AppChain communications (chainbridge)
 	chlog := st.s.logBackend.GetLogger("state/zkpki/chain")

@@ -1,5 +1,4 @@
-warped?=false
-ldflags="-buildid= -X github.com/katzenpost/katzenpost/core/epochtime.WarpedEpoch=${warped}"
+ldflags="-buildid="
 
 .PHONY: all
 all: cmd/pki/pki

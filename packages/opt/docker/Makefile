@@ -9,22 +9,24 @@
 #   mirrored      - plumbing upstream also defines, duplicated only because
 #                   this Makefile's own recipes need the value. Re-check these
 #                   against $(katzenpost_dir)/docker/Makefile on every
-#                   katzenpost upgrade. Currently mirrored from v0.0.104.
-# Everything else (mixes, auths, gateways, storageNodes, decoy toggles,
-# epoch_duration, log_level, base_port, ...) is inherited from upstream.
+#                   katzenpost upgrade. Currently mirrored from v0.0.105.
+# Everything else (decoy toggles, epoch_duration, TRANSPORT, log_level,
+# base_port, ...) is inherited from upstream.
 
 katzenpost_dir?=/tmp/katzenpost.opt
 katzenpost_version?=$(shell grep -E '^	github.com/katzenpost/katzenpost ' ../go.mod | awk '{print $$2}')
 
 ### local policy
-warped?=true
+# a small network; upstream defaults are 7 mixes, 6 auths, 5 gateways,
+# 4 storage nodes. mixes must be at least layers.
 compression?=true
+layers=3
 mixes=3
 auths=3
 gateways=1
 storageNodes=5
 # a single service node: custom-config injects the http_proxy plugin into
-# servicenode1 only (upstream default is 3).
+# servicenode1 only (upstream default is 4).
 serviceNodes=1
 # walletshield's RPC bodies need more room than upstream's 2000.
 UserForwardPayloadLength=30000
@@ -34,7 +36,7 @@ distro=alpine
 net_name=mixnet-$(distro)
 docker_compose_yml=$(net_name)/docker-compose.yml
 sh?=bash
-cache_dir=cache
+cache_dir?=cache
 go_mod_cache=$(cache_dir)/go
 go_build_cache=$(cache_dir)/go-build-$(distro)
 docker?=$(shell command -v podman >/dev/null 2>&1 && echo podman || echo docker)
@@ -42,7 +44,7 @@ uid?=$(shell [ "$$SUDO_UID" != "" ] && echo "$$SUDO_UID" || id -u)
 gid?=$(shell [ "$$SUDO_GID" != "" ] && echo "$$SUDO_GID" || id -g)
 docker_user?=$(shell if echo ${docker}|grep -q podman; then echo 0:0; else echo ${uid}:${gid}; fi)
 # upstream's ldflags, plus the local compression flag
-ldflags="-extldflags '-Wl,-z,stack-size=0x1F40000' -buildid= -X github.com/katzenpost/katzenpost/core/epochtime.WarpedEpoch=${warped} -X github.com/ZeroKnowledgeNetwork/opt/common.CompressionEnabled=${compression}"
+ldflags="-extldflags=-Wl,-z,stack-size=0x1F40000 -buildid= -X github.com/ZeroKnowledgeNetwork/opt/common.CompressionEnabled=${compression}"
 
 # upstream's docker_args, rooted at $(katzenpost_dir) instead of the relative
 # `..`/`.` that only resolve correctly from katzenpost/docker, plus:
@@ -134,9 +136,14 @@ walletshield-probe: $(net_dir)/walletshield.$(distro) $(net_dir)/running.stamp |
 	$(docker) run --network=host $(docker_args) $(mount_net_name) --rm katzenpost-$(distro)_base \
 		/$(net_name)/walletshield.$(distro) -config /$(net_name)/client/thinclient.toml -thin -log_level DEBUG -probe --probe_count 3
 
+# client.toml dials container hostnames (gateway1, auth1, ...), so the full
+# client must join the compose network, not the host's. The network name is
+# upstream's compose_network_name, derived here in the shell: defining it as a
+# variable would be exported and override upstream's own.
 .PHONY: walletshield-probe-full
 walletshield-probe-full: $(net_dir)/walletshield.$(distro) $(net_dir)/running.stamp | $(cache_dir)
-	$(docker) run --network=host $(docker_args) $(mount_net_name) --rm katzenpost-$(distro)_base \
+	net="$$(printf '%s_%s_katzenpost-net' '$(net_name)' "$$(cat $(kp_docker_dir)/.base_port_seed | sha1sum | head -c 5)" | tr -d .)"; \
+	$(docker) run --network=$$net $(docker_args) $(mount_net_name) --rm katzenpost-$(distro)_base \
 		/$(net_name)/walletshield.$(distro) -config /$(net_name)/client/client.toml --listen_client :64333 -log_level DEBUG -probe --probe_count 3
 
 .PHONY: walletshield-start

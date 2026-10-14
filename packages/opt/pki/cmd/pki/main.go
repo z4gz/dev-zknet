@@ -16,6 +16,7 @@ import (
 	"github.com/ZeroKnowledgeNetwork/opt/pki/server"
 	"github.com/katzenpost/katzenpost/authority/voting/server/config"
 	"github.com/katzenpost/katzenpost/core/compat"
+	"github.com/katzenpost/katzenpost/core/epochtime"
 )
 
 func main() {
@@ -36,6 +37,10 @@ func main() {
 	cfg, err := config.LoadFile(*cfgFile, *genOnly)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to load config file '%v': %v\n", *cfgFile, err)
+		os.Exit(-1)
+	}
+	if err := epochtime.Configure(cfg.Server.EpochDuration, os.Stderr); err != nil {
+		fmt.Fprintf(os.Stderr, "Config file '%v': %v\n", *cfgFile, err)
 		os.Exit(-1)
 	}
 

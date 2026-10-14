@@ -7,13 +7,13 @@ require (
 	github.com/ZeroKnowledgeNetwork/appchain-agent/clients/go v0.0.0-20250320061231-774b32400141
 	github.com/carlmjohnson/versioninfo v0.22.5
 	github.com/charmbracelet/log v0.4.0
-	github.com/fxamacker/cbor/v2 v2.9.1
-	github.com/katzenpost/hpqc v0.0.86
-	github.com/katzenpost/katzenpost v0.0.104
-	github.com/quic-go/quic-go v0.59.0
-	github.com/stretchr/testify v1.11.1
-	go.etcd.io/bbolt v1.4.3
-	golang.org/x/crypto v0.51.0
+	github.com/fxamacker/cbor/v2 v2.9.6
+	github.com/katzenpost/hpqc v0.0.91
+	github.com/katzenpost/katzenpost v0.0.105
+	github.com/quic-go/quic-go v0.59.1
+	github.com/stretchr/testify v1.12.1
+	go.etcd.io/bbolt v1.5.0
+	golang.org/x/crypto v0.58.0
 	gopkg.in/op/go-logging.v1 v1.0.0-20160211212156-b2cb9fa56473
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -40,8 +40,7 @@ require (
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/coder/websocket v1.8.15 // indirect
-	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/go-logfmt/logfmt v0.6.0 // indirect
+	github.com/go-logfmt/logfmt v0.6.1 // indirect
 	github.com/grafana/pyroscope-go v1.2.8 // indirect
 	github.com/grafana/pyroscope-go/godeltaprof v0.1.9 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
@@ -56,7 +55,7 @@ require (
 	github.com/klauspost/compress v1.18.5 // indirect
 	github.com/lesismal/nbio v1.5.11 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.0 // indirect
-	github.com/mattn/go-isatty v0.0.18 // indirect
+	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-pointer v0.0.1 // indirect
 	github.com/mattn/go-runewidth v0.0.23 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
@@ -68,7 +67,6 @@ require (
 	github.com/muesli/termenv v0.15.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/oasisprotocol/deoxysii v0.0.0-20220228165953-2091330c22b7 // indirect
-	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/prometheus/client_golang v1.23.2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.67.5 // indirect
@@ -85,10 +83,11 @@ require (
 	gitlab.com/yawning/bsaes.git v0.0.0-20190805113838-0a714cd429ec // indirect
 	gitlab.com/yawning/x448.git v0.0.0-20221003101044-617eb9b7d9b7 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/exp v0.0.0-20240904232852-e7e105dedf7e // indirect
-	golang.org/x/net v0.53.0 // indirect
-	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.44.0 // indirect
-	golang.org/x/text v0.37.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
+	golang.org/x/sync v0.24.0 // indirect
+	golang.org/x/sys v0.49.0 // indirect
+	golang.org/x/text v0.43.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )

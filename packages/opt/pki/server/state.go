@@ -62,15 +62,20 @@ const (
 	publicKeyHashSize = 32
 )
 
+func MixPublishDeadline() time.Duration { return epochtime.Period() / 8 }
+
+func AuthorityVoteDeadline() time.Duration { return MixPublishDeadline() + epochtime.Period()/8 }
+
+func AuthorityRevealDeadline() time.Duration { return AuthorityVoteDeadline() + epochtime.Period()/8 }
+
+func AuthorityCertDeadline() time.Duration { return AuthorityRevealDeadline() + epochtime.Period()/8 }
+
+func PublishConsensusDeadline() time.Duration { return AuthorityCertDeadline() + epochtime.Period()/8 }
+
 var (
-	MixPublishDeadline       = epochtime.Period / 8
-	AuthorityVoteDeadline    = MixPublishDeadline + epochtime.Period/8
-	AuthorityRevealDeadline  = AuthorityVoteDeadline + epochtime.Period/8
-	AuthorityCertDeadline    = AuthorityRevealDeadline + epochtime.Period/8
-	PublishConsensusDeadline = AuthorityCertDeadline + epochtime.Period/8
-	errGone                  = errors.New("authority: Requested epoch will never get a Document")
-	errNotYet                = errors.New("authority: Document is not ready yet")
-	errInvalidTopology       = errors.New("authority: Invalid Topology")
+	errGone            = errors.New("authority: Requested epoch will never get a Document")
+	errNotYet          = errors.New("authority: Document is not ready yet")
+	errInvalidTopology = errors.New("authority: Invalid Topology")
 )
 
 type descriptor struct {
@@ -177,7 +182,7 @@ func (s *state) fsm() <-chan time.Time {
 		s.genesisEpoch = 0
 		s.backgroundFetchConsensus(epoch - 1)
 		s.backgroundFetchConsensus(epoch)
-		if elapsed > MixPublishDeadline {
+		if elapsed > MixPublishDeadline() {
 			s.log.Errorf("Too late to vote this round, sleeping until %s", nextEpoch)
 			sleep = nextEpoch
 			s.votingEpoch = epoch + 2
@@ -185,7 +190,7 @@ func (s *state) fsm() <-chan time.Time {
 		} else {
 			s.votingEpoch = epoch + 1
 			s.state = stateAcceptDescriptor
-			sleep = MixPublishDeadline - elapsed
+			sleep = MixPublishDeadline() - elapsed
 			if sleep < 0 {
 				sleep = 0
 			}
@@ -205,13 +210,13 @@ func (s *state) fsm() <-chan time.Time {
 		}
 		s.state = stateAcceptVote
 		_, nowelapsed, _ := epochtime.Now()
-		sleep = AuthorityVoteDeadline - nowelapsed
+		sleep = AuthorityVoteDeadline() - nowelapsed
 	case stateAcceptVote:
 		signed := s.reveal(s.votingEpoch)
 		s.sendRevealToAuthorities(signed, s.votingEpoch)
 		s.state = stateAcceptReveal
 		_, nowelapsed, _ := epochtime.Now()
-		sleep = AuthorityRevealDeadline - nowelapsed
+		sleep = AuthorityRevealDeadline() - nowelapsed
 	case stateAcceptReveal:
 		signed, err := s.getCertificate(s.votingEpoch)
 		if err == nil {
@@ -226,7 +231,7 @@ func (s *state) fsm() <-chan time.Time {
 		}
 		s.state = stateAcceptCert
 		_, nowelapsed, _ := epochtime.Now()
-		sleep = AuthorityCertDeadline - nowelapsed
+		sleep = AuthorityCertDeadline() - nowelapsed
 	case stateAcceptCert:
 		doc, err := s.getMyConsensus(s.votingEpoch)
 		if err == nil {
@@ -256,7 +261,7 @@ func (s *state) fsm() <-chan time.Time {
 		}
 		s.state = stateAcceptSignature
 		_, nowelapsed, _ := epochtime.Now()
-		sleep = PublishConsensusDeadline - nowelapsed
+		sleep = PublishConsensusDeadline() - nowelapsed
 	case stateAcceptSignature:
 		// combine signatures over a certificate and see if we make a threshold consensus
 		s.log.Noticef("Combining signatures for epoch %v", s.votingEpoch)
@@ -264,7 +269,7 @@ func (s *state) fsm() <-chan time.Time {
 		_, _, nextEpoch := epochtime.Now()
 		if err == nil {
 			s.state = stateAcceptDescriptor
-			sleep = MixPublishDeadline + nextEpoch
+			sleep = MixPublishDeadline() + nextEpoch
 			s.votingEpoch++
 		} else {
 			s.log.Error(err.Error())
@@ -297,7 +302,7 @@ func (s *state) getVote(epoch uint64) (*pki.Document, error) {
 	if d, ok := s.documents[s.votingEpoch-1]; ok {
 		s.log.Debugf("Restoring genesisEpoch %d from document cache", d.GenesisEpoch)
 		s.genesisEpoch = d.GenesisEpoch
-		s.priorSRV = d.PriorSharedRandom
+		s.priorSRV = d.WeeklySharedRandom
 		d.PKISignatureScheme = s.s.cfg.Server.PKISignatureScheme
 	} else {
 		s.log.Debugf("Setting genesisEpoch %d from votingEpoch", s.votingEpoch)
@@ -383,7 +388,7 @@ func (s *state) getCertificate(epoch uint64) (*pki.Document, error) {
 	// if there are no prior SRV values, copy the current srv twice
 	if len(s.priorSRV) == 0 {
 		s.priorSRV = [][]byte{srv, srv}
-	} else if epoch%epochtime.WeekOfEpochs == 0 {
+	} else if epoch%epochtime.WeekOfEpochs() == 0 {
 		// rotate the weekly epochs if it is time to do so.
 		s.priorSRV = [][]byte{srv, s.priorSRV[0]}
 	}
@@ -440,7 +445,7 @@ func (s *state) getMyConsensus(epoch uint64) (*pki.Document, error) {
 	// if there are no prior SRV values, copy the current srv twice
 	if epoch == s.genesisEpoch {
 		s.priorSRV = [][]byte{srv, srv}
-	} else if epoch%epochtime.WeekOfEpochs == 0 {
+	} else if epoch%epochtime.WeekOfEpochs() == 0 {
 		// rotate the weekly epochs if it is time to do so.
 		s.priorSRV = [][]byte{srv, s.priorSRV[0]}
 	}
@@ -583,13 +588,13 @@ func (s *state) getDocument(descriptors []*pki.MixDescriptor, replicaDescriptors
 		ConfiguredReplicaIDs:          configuredReplicaIDs,
 		ConfiguredReplicaIdentityKeys: configuredReplicaKeys,
 		SharedRandomValue:             srv,
-		PriorSharedRandom:             s.priorSRV,
+		WeeklySharedRandom:            s.priorSRV,
 		SphinxGeometryHash:            s.geo.Hash(),
 		PKISignatureScheme:            s.s.cfg.Server.PKISignatureScheme,
 	}
 
 	/****** ZK-PKI ******/
-	doc.PriorSharedRandom = [][]byte{srv} // this is made up, to suffice IsDocumentWellFormed
+	doc.WeeklySharedRandom = [][]byte{srv} // this is made up, to suffice IsDocumentWellFormed
 	/****** ZK-PKI ******/
 
 	return doc
@@ -1809,7 +1814,7 @@ func (s *state) onDescriptorUpload(rawDesc []byte, desc *pki.MixDescriptor, epoc
 }
 
 func (s *state) documentForEpoch(epoch uint64) ([]byte, error) {
-	var generationDeadline = 7 * (epochtime.Period / 8)
+	var generationDeadline = 7 * (epochtime.Period() / 8)
 
 	s.RLock()
 	defer s.RUnlock()
@@ -2001,11 +2006,11 @@ func newState(s *Server) (*state, error) {
 	// set voting schedule at runtime
 
 	/****** ZK-PKI ****** Use custom epoch schedule
-	st.log.Debugf("State initialized with epoch Period: %s", epochtime.Period)
-	st.log.Debugf("State initialized with MixPublishDeadline: %s", MixPublishDeadline)
-	st.log.Debugf("State initialized with AuthorityVoteDeadline: %s", AuthorityVoteDeadline)
-	st.log.Debugf("State initialized with AuthorityRevealDeadline: %s", AuthorityRevealDeadline)
-	st.log.Debugf("State initialized with PublishConsensusDeadline: %s", PublishConsensusDeadline)
+	st.log.Debugf("State initialized with epoch Period: %s", epochtime.Period())
+	st.log.Debugf("State initialized with MixPublishDeadline: %s", MixPublishDeadline())
+	st.log.Debugf("State initialized with AuthorityVoteDeadline: %s", AuthorityVoteDeadline())
+	st.log.Debugf("State initialized with AuthorityRevealDeadline: %s", AuthorityRevealDeadline())
+	st.log.Debugf("State initialized with PublishConsensusDeadline: %s", PublishConsensusDeadline())
 	****** ZK-PKI ******/
 	st.verifiers = make(map[[publicKeyHashSize]byte]sign.PublicKey)
 	for _, auth := range s.cfg.Authorities {

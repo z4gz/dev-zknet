@@ -172,6 +172,8 @@ this local proxy. Restricting origins is future work.
   and the module path `github.com/ZeroKnowledgeNetwork/opt` is load-bearing in both
   imports and `-ldflags -X` build flags — do not rename or re-root it.
 - See `AGENTS.md` for the Nx skills and agent guidance that apply to this workspace.
+- To move to a new upstream Katzenpost tag, follow
+  [`packages/opt/UPGRADING.md`](packages/opt/UPGRADING.md).
 
 ## Other source paths
 
