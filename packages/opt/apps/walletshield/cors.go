@@ -2,7 +2,16 @@
 
 package main
 
-import "net/http"
+import (
+	"net/http"
+	"strings"
+
+	"github.com/ZeroKnowledgeNetwork/opt/server_plugins/cbor_plugins/http_proxy"
+)
+
+// exposedHeaders lets a browser read the failure marker and every relayed
+// upstream header that is not CORS-safelisted.
+var exposedHeaders = strings.Join(append([]string{http_proxy.ErrorHeader}, http_proxy.RelayedHeaders...), ", ")
 
 func isPreflight(req *http.Request) bool {
 	return req.Method == http.MethodOptions &&
@@ -26,6 +35,7 @@ func withCORS(next http.HandlerFunc) http.HandlerFunc {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
+		w.Header().Set("Access-Control-Expose-Headers", exposedHeaders)
 		next(w, req)
 	}
 }

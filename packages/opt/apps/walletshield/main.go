@@ -6,6 +6,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"math"
@@ -15,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/carlmjohnson/versioninfo"
 	"github.com/charmbracelet/log"
 	"github.com/fxamacker/cbor/v2"
 
@@ -38,7 +41,34 @@ var (
 
 	// Note: UserForwardPayloadLength should match the same value passed to genconfig.
 	UserForwardPayloadLength = 30000
+
+	// errTooLarge marks a request that does not fit one mixnet payload.
+	errTooLarge = errors.New("payload too large")
 )
+
+// healthPath is answered locally, without a mixnet round trip, so a client can
+// tell an absent WalletShield from an unreachable mixnet.
+const healthPath = "/_/health"
+
+// failureStatus is the HTTP status of each reply WalletShield originates
+// instead of relaying from the upstream.
+var failureStatus = map[string]int{
+	http_proxy.ReasonMixTimeout:          http.StatusGatewayTimeout,
+	http_proxy.ReasonExitRefused:         http.StatusBadGateway,
+	http_proxy.ReasonUpstreamUnreachable: http.StatusBadGateway,
+	http_proxy.ReasonTooLarge:            http.StatusRequestEntityTooLarge,
+	http_proxy.ReasonBadReply:            http.StatusBadGateway,
+}
+
+// legacyErrorReasons classifies, by prefix, the Error strings that an exit
+// predating Response.Reason sends after it has contacted the upstream. Any
+// other Error from such an exit is ReasonExitRefused.
+var legacyErrorReasons = map[string]string{
+	"HTTP request failed":          http_proxy.ReasonUpstreamUnreachable,
+	"io.ReadAll(resp.Body) failed": http_proxy.ReasonUpstreamUnreachable,
+	"Failed to compress response":  http_proxy.ReasonUpstreamUnreachable,
+	"HTTP response is too big":     http_proxy.ReasonTooLarge,
+}
 
 func sendRequest(thin *thin.ThinClient, httpRequestBytes []byte) ([]byte, error) {
 	// Compress the HTTP request
@@ -60,7 +90,7 @@ func sendRequest(thin *thin.ThinClient, httpRequestBytes []byte) ([]byte, error)
 
 	// Validate payload size
 	if len(blob) > UserForwardPayloadLength {
-		return nil, fmt.Errorf("payload size %d exceeds maximum %d bytes", len(blob), UserForwardPayloadLength)
+		return nil, fmt.Errorf("%w: payload size %d exceeds maximum %d bytes", errTooLarge, len(blob), UserForwardPayloadLength)
 	}
 
 	surbID := &[sConstants.SURBIDLength]byte{}
@@ -257,6 +287,11 @@ func main() {
 func (s *Server) Handler(w http.ResponseWriter, req *http.Request) {
 	s.log.Infof("Received HTTP request for %s", req.URL)
 
+	if req.Method == http.MethodGet && req.URL.Path == healthPath {
+		writeJSON(w, http.StatusOK, map[string]string{"version": versioninfo.Short()})
+		return
+	}
+
 	myurl, err := url.Parse(req.RequestURI)
 	if err != nil {
 		s.log.Errorf("url.Parse(req.RequestURI) failed: %s", err)
@@ -273,11 +308,10 @@ func (s *Server) Handler(w http.ResponseWriter, req *http.Request) {
 	rawReply, err := s.send(buf.Bytes())
 	if err != nil {
 		s.log.Errorf("Failed to send message: %s", err)
-		// Check if it's a payload size error
-		if strings.Contains(err.Error(), "exceeds maximum") {
-			http.Error(w, "custom 500", http.StatusInternalServerError)
+		if errors.Is(err, errTooLarge) {
+			writeFailure(w, http_proxy.ReasonTooLarge, err.Error())
 		} else {
-			http.Error(w, "custom 404", http.StatusNotFound)
+			writeFailure(w, http_proxy.ReasonMixTimeout, err.Error())
 		}
 		return
 	}
@@ -289,29 +323,82 @@ func (s *Server) Handler(w http.ResponseWriter, req *http.Request) {
 	err = dec.Decode(response)
 	if err != nil {
 		s.log.Errorf("Failed to decode response: %s", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		writeFailure(w, http_proxy.ReasonBadReply, fmt.Sprintf("cannot decode exit reply: %s", err))
 		return
 	}
 
 	if response.Error != "" {
 		s.log.Errorf("Response Error: %s", response.Error)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		writeFailure(w, exitReason(response), response.Error)
 		return
 	}
 
 	responsePayload, err := common.DecompressData(response.Payload)
 	if err != nil {
 		s.log.Errorf("common.DecompressData failed: %s", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		writeFailure(w, http_proxy.ReasonBadReply, fmt.Sprintf("cannot decompress exit reply: %s", err))
 		return
 	}
 
-	s.log.Infof("Response: %s", responsePayload)
+	status := response.Status
+	header := http_proxy.FilterHeaders(response.Header)
+	if status == 0 {
+		// An exit that predates Response.Status relays neither status nor
+		// headers; keep the reply that WalletShield gave before.
+		status = http.StatusOK
+		header.Set("Content-Type", "application/json")
+	}
+	if status < 200 || status > 599 {
+		s.log.Errorf("Invalid upstream status %d", status)
+		writeFailure(w, http_proxy.ReasonBadReply, fmt.Sprintf("invalid upstream status %d", status))
+		return
+	}
 
-	w.Header().Set("Content-Type", "application/json")
+	s.log.Infof("Response %d: %s", status, responsePayload)
+
+	for k, v := range header {
+		w.Header()[k] = v
+	}
+	if _, ok := header["Content-Type"]; !ok {
+		// Relay the upstream's absent Content-Type instead of sniffing one.
+		w.Header()["Content-Type"] = nil
+	}
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(responsePayload)))
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(status)
 	w.Write(responsePayload)
+}
+
+// exitReason returns the Reason of an exit error reply, classifying the Error
+// string of an exit that predates Response.Reason.
+func exitReason(r *http_proxy.Response) string {
+	if _, ok := failureStatus[r.Reason]; ok {
+		return r.Reason
+	}
+	for prefix, reason := range legacyErrorReasons {
+		if strings.HasPrefix(r.Error, prefix) {
+			return reason
+		}
+	}
+	return http_proxy.ReasonExitRefused
+}
+
+// writeFailure answers with a reply WalletShield originates, marked by
+// ErrorHeader so it is never mistaken for an upstream reply.
+func writeFailure(w http.ResponseWriter, reason, message string) {
+	type failure struct {
+		Reason  string `json:"reason"`
+		Message string `json:"message"`
+	}
+	w.Header().Set(http_proxy.ErrorHeader, reason)
+	writeJSON(w, failureStatus[reason], map[string]failure{"error": {reason, message}})
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	body, _ := json.Marshal(v)
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(body)))
+	w.WriteHeader(status)
+	w.Write(body)
 }
 
 func (s *Server) SendTestProbes(testProbeSendDelay int, testProbeCount int, testProbeResponseDelay int) {
