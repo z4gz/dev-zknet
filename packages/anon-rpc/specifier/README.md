@@ -97,7 +97,8 @@ The pinned hash is only meaningful if anyone can rebuild the same bytes from the
 `pnpm nx run @zknet/anon-rpc-worker:build --skip-nx-cache`) and fails on any difference, naming
 the first differing byte. `--clean-export` builds each run from a fresh `git archive` of `--ref` at
 paths of different lengths, after `pnpm install --frozen-lockfile`, which also catches leaks of the
-build path and of untracked files.
+build path and of untracked files. `--ref WORKTREE` exports what committing the working tree would
+capture instead, to check work before it is committed.
 
 ## Requirements
 

@@ -44,3 +44,18 @@ test('firstDifference', () => {
   assert.equal(firstDifference(Buffer.from('abc'), Buffer.from('abd')), 2);
   assert.equal(firstDifference(Buffer.from('ab'), Buffer.from('abc')), 2);
 });
+
+test('--clean-export --ref WORKTREE exports uncommitted files and catches a path leak', () => {
+  // This test file itself may be uncommitted; the export must still hold it.
+  const self = relative(WORKSPACE_DIR, join(PROJECT_DIR, 'tests/reproducible.test.mjs'));
+  const base = ['--bundle', OUT, '--clean-export', '--ref', 'WORKTREE', '--install', 'true'];
+  const run = (/** @type {string} */ build) =>
+    spawnSync(process.execPath, [SCRIPT, ...base, '--build', build], { encoding: 'utf8' });
+
+  const same = run(`mkdir -p $(dirname ${out}) && cp ${self} ${out}`);
+  assert.equal(same.status, 0, same.stdout + same.stderr);
+  assert.match(same.stdout, /clean export of WORKTREE/);
+
+  const leaky = run(`mkdir -p $(dirname ${out}) && pwd > ${out}`);
+  assert.equal(leaky.status, 1, leaky.stdout + leaky.stderr);
+});

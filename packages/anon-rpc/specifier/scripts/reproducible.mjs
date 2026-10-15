@@ -15,7 +15,9 @@
 //   HEAD) in its own temporary directory, at paths of different lengths,
 //   after the install command. Also catches leaks of the absolute build path
 //   and of anything untracked in the working tree. Uncommitted changes are,
-//   by design, not part of the export.
+//   by design, not part of the export. --ref WORKTREE instead exports what
+//   committing the working tree would capture (tracked plus untracked,
+//   non-ignored files), to check work before it is committed.
 //
 // Defaults: --build $WORKER_BUILD_CMD or the worker project's Nx build without
 // the cache; --bundle $WORKER_BUNDLE or the worker bundle contract path;
@@ -33,6 +35,9 @@ import { CliError, isMain, runMain } from './lib/proc.mjs';
 export const DEFAULT_BUILD = 'pnpm nx run @zknet/anon-rpc-worker:build --skip-nx-cache';
 export const DEFAULT_INSTALL = 'pnpm install --frozen-lockfile --prefer-offline';
 
+/** The --ref value that exports the working tree instead of a commit. */
+export const WORKTREE = 'WORKTREE';
+
 /** @param {string} cmd @param {string} cwd */
 function sh(cmd, cwd) {
   const r = spawnSync('sh', ['-c', cmd], {
@@ -41,6 +46,42 @@ function sh(cmd, cwd) {
     env: { ...process.env, NX_DAEMON: 'false' },
   });
   if (r.status !== 0) throw new CliError(`\`${cmd}\` failed in ${cwd} (exit ${r.status})`);
+}
+
+/**
+ * Materialize a clean tree at `dest`: a commit through `git archive`, or, for
+ * WORKTREE, the files a commit of the working tree would hold — tracked files
+ * as they are on disk plus untracked ones that are not ignored.
+ * @param {string} ref
+ * @param {string} dest
+ */
+function exportTree(ref, dest) {
+  if (ref !== WORKTREE) {
+    const archive = execFileSync('git', ['archive', '--format=tar', ref], {
+      cwd: WORKSPACE_DIR,
+      maxBuffer: 1 << 30,
+    });
+    execFileSync('tar', ['-x', '-C', dest], { input: archive });
+    return;
+  }
+  const listed = execFileSync(
+    'git',
+    ['ls-files', '-z', '--cached', '--others', '--exclude-standard'],
+    {
+      cwd: WORKSPACE_DIR,
+      maxBuffer: 1 << 30,
+    },
+  );
+  // A path still in the index but deleted on disk is not part of the tree.
+  const files = listed
+    .toString('utf8')
+    .split('\0')
+    .filter((f) => f !== '' && existsSync(join(WORKSPACE_DIR, f)));
+  const archive = execFileSync('tar', ['-c', '-C', WORKSPACE_DIR, '--null', '-T', '-', '-f', '-'], {
+    input: files.join('\0'),
+    maxBuffer: 1 << 30,
+  });
+  execFileSync('tar', ['-x', '-C', dest], { input: archive });
 }
 
 /** @param {Buffer} a @param {Buffer} b @returns {number} first differing offset, -1 if equal */
@@ -87,15 +128,7 @@ async function main(argv) {
         root = join(mkdtempSync(join(tmpdir(), `zknet-repro-${'x'.repeat(i)}-`)), 'src');
         scratch.push(join(root, '..'));
         mkdirSync(root);
-        const archive = execFileSync(
-          'git',
-          ['archive', '--format=tar', /** @type {string} */ (values.ref)],
-          {
-            cwd: WORKSPACE_DIR,
-            maxBuffer: 1 << 30,
-          },
-        );
-        execFileSync('tar', ['-x', '-C', root], { input: archive });
+        exportTree(/** @type {string} */ (values.ref), root);
         console.log(`\n== run ${i}: clean export of ${values.ref} at ${root}`);
         sh(/** @type {string} */ (values.install), root);
       } else {
