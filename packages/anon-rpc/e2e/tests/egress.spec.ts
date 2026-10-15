@@ -203,16 +203,13 @@ test('a leaky worker is flagged: ambient fetches, a localhost alias, a public ho
   }
 });
 
-test('known gap: through a browser proxy, WalletShield calls fail (targetAddressSpace)', async ({
+test('through a browser proxy, WalletShield calls succeed (no targetAddressSpace)', async ({
   browser,
 }) => {
   // Chromium refuses a fetch naming a targetAddressSpace once it is proxied
-  // ("resource is in address space `unknown`"), and the transport names one on
-  // every WalletShield request. A user whose browser proxies the WalletShield
-  // address (here: loopback forced through the proxy) gets PeerUnreachable.
-  // Expected to fail until the transport stops sending it or Chromium changes;
-  // Playwright then reports "unexpectedly passed".
-  test.fail();
+  // ("resource is in address space `unknown`"). The transport names none, so a
+  // user whose browser proxies the WalletShield address (here: loopback forced
+  // through the proxy) still reaches it.
   const guard = await guarded(browser, '<-loopback>');
   try {
     const page = await open(guard);
