@@ -66,6 +66,11 @@ Mixed content behaves differently per browser:
   a LAN WalletShield only if WalletShield serves `https:`.** Loopback is
   unaffected in both browsers.
 
+The worker sends no `targetAddressSpace` fetch option. Chromium needs it only
+for a public host name that resolves to a local address, which the worker
+refuses anyway. Chromium also rejects any fetch naming it once that fetch
+goes through a browser proxy.
+
 ## Reply and failure contract
 
 - **Success.** The worker relays a successful exit round trip **truthfully**:

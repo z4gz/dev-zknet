@@ -44,14 +44,6 @@ export const EXIT_PROBE_PATH = '/_/probe/0';
 /** Default per-request deadline. Above WalletShield's own `-timeout` (20 s) so its `mix-timeout` wins. */
 export const DEFAULT_TIMEOUT_MS = 30_000;
 
-/**
- * Chromium's `fetch` `targetAddressSpace` per class; other engines ignore it.
- * Not needed for the IP literals and `.local` names this transport accepts
- * (Chromium exempts those from mixed content itself); sent so a future
- * relaxation of the target rules cannot silently lose the exemption.
- */
-const ADDRESS_SPACE: Readonly<Record<TargetClass, string>> = { loopback: 'loopback', lan: 'local' };
-
 export interface WalletShieldOptions {
   /** Base URL of the WalletShield listener. Default DEFAULT_WALLETSHIELD_URL. */
   url?: string;
@@ -172,6 +164,10 @@ export class WalletShieldTransport implements Transport {
    * One HTTP exchange with WalletShield under the caller's signal, the
    * deadline and `close()`. A `ZKNet-Error` reply rejects; `read` consumes
    * every other reply.
+   *
+   * No `targetAddressSpace`: Chromium needs it only for a public host name
+   * that resolves to a local address, which targets.ts refuses, and it
+   * refuses any fetch naming one once that fetch goes through a browser proxy.
    */
   async #exchange<T>(path: string, init: RequestInit, signal: AbortSignal | undefined, read: (res: Response) => Promise<T>): Promise<T> {
     if (signal?.aborted) throw aborted();
@@ -193,8 +189,7 @@ export class WalletShieldTransport implements Transport {
         cache: 'no-store',
         redirect: 'error',
         signal: combined,
-        targetAddressSpace: ADDRESS_SPACE[this.target],
-      } as RequestInit);
+      });
       const reason = res.headers.get(ZKNET_ERROR_HEADER);
       if (reason !== null) throw zknetError(reason.trim(), await errorMessage(res));
       return await read(res);
@@ -232,8 +227,7 @@ export class WalletShieldTransport implements Transport {
         credentials: 'omit',
         cache: 'no-store',
         signal: AbortSignal.any([AbortSignal.timeout(this.#timeoutMs), this.#closed.signal, ...(signal ? [signal] : [])]),
-        targetAddressSpace: ADDRESS_SPACE[this.target],
-      } as RequestInit);
+      });
       return true;
     } catch {
       return false;

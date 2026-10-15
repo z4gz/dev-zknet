@@ -151,6 +151,19 @@ describe('request', () => {
     expect([e.code, e.name]).toEqual(['network-error', 'PeerUnreachable']);
   });
 
+  it('names no targetAddressSpace (Chromium refuses it through a proxy)', async () => {
+    const inits: RequestInit[] = [];
+    const spy = (async (url: string, init?: RequestInit) => {
+      inits.push(init ?? {});
+      return fetch(url, init);
+    }) as typeof fetch;
+    const t = new WalletShieldTransport({ url: stub.url, fetch: spy });
+    await t.request(req());
+    await t.probe({ depth: 'exit' });
+    expect(inits.length).toBeGreaterThan(0);
+    for (const init of inits) expect(init).not.toHaveProperty('targetAddressSpace');
+  });
+
   it('names a predicted mixed-content block for an http: LAN peer from a secure context', async () => {
     const t = new WalletShieldTransport({ url: 'http://192.168.1.20:7070', fetch: failingFetch, isSecureContext: true });
     expect(t.mixedContentPredicted).toBe(true);
