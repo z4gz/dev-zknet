@@ -16,24 +16,25 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { digestFile } from './lib/digest.mjs';
-import {
-  DEFAULT_BUNDLE,
-  DEFAULT_RESOLVER_PORT,
-  DEPLOYMENTS_DIR,
-  PROJECT_DIR,
-} from './lib/paths.mjs';
+import { DEFAULT_BUNDLE, DEFAULT_RESOLVER_PORT, PROJECT_DIR, STATE_DIR } from './lib/paths.mjs';
 import { CliError, isMain, runMain } from './lib/proc.mjs';
 
 export const ANVIL_PORT = 8545;
 export const RPC_URL = `http://127.0.0.1:${ANVIL_PORT}`;
 export const CHAIN_ID = 31337;
 /**
- * Where anvil puts the first contract account 0 deploys (nonce 0). The demo's
- * `zknet-local` adopters entry hardcodes it, so it holds as long as the
- * specifier is the first transaction on a fresh anvil; `--update` keeps the
- * address afterwards.
+ * The demo deploys from anvil's default account #9, not account 0, so its
+ * specifier has an address of its own: account 0's first contract
+ * (0x5FbD…0aa3) is what every other local deploy gets, and a page that knows
+ * one of them would mistake it for the other. The demo's `zknet-local` adopters
+ * entry hardcodes the result. It holds while this is account #9's first
+ * transaction on the chain; `--update` keeps the address afterwards.
  */
-export const EXPECTED_ADDRESS = '0x5FbDB2315678afecb367f032d93F642f64180aa3';
+export const DEPLOYER = '0xa0Ee7A142d267C1f36714E4a8F75612F20a79720';
+export const EXPECTED_ADDRESS = '0x700b6A60ce7EaaEA56F065753d8dcB9653dbAD35';
+
+/** The demo's own deployment record, apart from the local loop's `deploy`. */
+const DEPLOYMENTS = join(STATE_DIR, 'demo-deployments');
 
 /** Run one of this project's scripts, streaming its output. */
 function script(name, args) {
@@ -62,17 +63,28 @@ async function up() {
   await script('anvil.mjs', ['start', '--port', String(ANVIL_PORT)]);
   // --update: same bundle → no-op; new bundle → setWorker on the same address.
   await script('deploy.mjs', [
+    '--from',
+    DEPLOYER,
     '--bundle',
     bundle,
     '--rpc-url',
     RPC_URL,
     '--resolver',
     resolver,
+    '--deployments',
+    DEPLOYMENTS,
     '--update',
   ]);
-  await script('verify.mjs', ['--rpc-url', RPC_URL, '--bundle', bundle]);
+  await script('verify.mjs', [
+    '--rpc-url',
+    RPC_URL,
+    '--bundle',
+    bundle,
+    '--deployments',
+    DEPLOYMENTS,
+  ]);
 
-  const record = JSON.parse(readFileSync(join(DEPLOYMENTS_DIR, `${CHAIN_ID}.json`), 'utf8'));
+  const record = JSON.parse(readFileSync(join(DEPLOYMENTS, `${CHAIN_ID}.json`), 'utf8'));
   const digest = await digestFile(bundle);
   const config = {
     walletshield: process.env.DEMO_WALLETSHIELD || 'http://127.0.0.1:7070',
@@ -82,7 +94,7 @@ async function up() {
   console.log(`
 ZKNet anon-rpc demo backend is up.
 
-  Specifier address  ${record.address}${moved ? `\n                     ⚠ not ${EXPECTED_ADDRESS}: something else deployed first on this anvil;\n                       run demo-down then demo-up for a fresh chain, or use "Custom" with this address` : '   (anvil\'s first deploy; the "ZKNet (local anvil)" preset)'}
+  Specifier address  ${record.address}${moved ? `\n                     ⚠ not ${EXPECTED_ADDRESS}: account #9 sent another transaction first on this anvil;\n                       run demo-down then demo-up for a fresh chain, or use "Custom" with this address` : '   (the "ZKNet (local anvil)" preset)'}
   Chain id           ${CHAIN_ID} (anvil)
   Bootstrap RPC      ${RPC_URL}
   Worker RPC         http://zknet.invalid/ethereum-rpc
