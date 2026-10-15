@@ -5,6 +5,7 @@
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { UPSTREAM_HEADERS } from '../lib/walletshield.js';
 
 export interface StubReply {
   status: number;
@@ -56,7 +57,8 @@ export async function startStubWalletShield(version = 'stub-0.0.0'): Promise<Stu
     stub.requests.push({ method: req.method ?? '', path, headers: req.headers, body: new Uint8Array(Buffer.concat(chunks)) });
 
     res.setHeader('access-control-allow-origin', '*');
-    res.setHeader('access-control-expose-headers', 'ZKNet-Error');
+    // As WalletShield does: the failure marker plus every relayed upstream header, so a browser can read them.
+    res.setHeader('access-control-expose-headers', ['ZKNet-Error', ...UPSTREAM_HEADERS].join(', '));
     let reply: StubReply | 'hang';
     if (req.method === 'GET' && path === '/_/health') {
       reply = stub.health
