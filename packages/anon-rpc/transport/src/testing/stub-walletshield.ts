@@ -57,6 +57,16 @@ export async function startStubWalletShield(version = 'stub-0.0.0'): Promise<Stu
     stub.requests.push({ method: req.method ?? '', path, headers: req.headers, body: new Uint8Array(Buffer.concat(chunks)) });
 
     res.setHeader('access-control-allow-origin', '*');
+    // As WalletShield does (apps/walletshield/cors.go): a browser's CORS
+    // preflight is answered locally, never treated as a request.
+    if (req.method === 'OPTIONS' && req.headers.origin && req.headers['access-control-request-method']) {
+      res.setHeader('access-control-allow-methods', 'GET, POST');
+      const requested = req.headers['access-control-request-headers'];
+      if (requested) res.setHeader('access-control-allow-headers', requested);
+      res.setHeader('access-control-max-age', '600');
+      res.writeHead(204).end();
+      return;
+    }
     // As WalletShield does: the failure marker plus every relayed upstream header, so a browser can read them.
     res.setHeader('access-control-expose-headers', ['ZKNet-Error', ...UPSTREAM_HEADERS].join(', '));
     let reply: StubReply | 'hang';
