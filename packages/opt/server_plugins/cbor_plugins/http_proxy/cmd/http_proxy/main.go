@@ -212,10 +212,6 @@ func (s *proxyRequestHandler) OnCommand(cmd cborplugin.Command) error {
 			s.log.Errorf("common.CompressData failed: %s", err)
 			return s.sendError(r.ID, r.SURB, http_proxy.ReasonUpstreamUnreachable, "Failed to compress response")
 		}
-		if len(responsePayload) > MaxPayloadSize {
-			s.log.Error("HTTP response body exceeds max Sphinx payload")
-			return s.sendError(r.ID, r.SURB, http_proxy.ReasonTooLarge, "HTTP response is too big")
-		}
 		response := &http_proxy.Response{
 			Payload: responsePayload,
 			Status:  resp.StatusCode,
@@ -226,6 +222,10 @@ func (s *proxyRequestHandler) OnCommand(cmd cborplugin.Command) error {
 		if err != nil {
 			s.log.Errorf("cbor.Marshal(response) failed: %s", err)
 			return s.sendError(r.ID, r.SURB, http_proxy.ReasonUpstreamUnreachable, "Error marshaling response")
+		}
+		if len(payload) > MaxPayloadSize {
+			s.log.Error("HTTP response exceeds max Sphinx payload")
+			return s.sendError(r.ID, r.SURB, http_proxy.ReasonTooLarge, "HTTP response is too big")
 		}
 
 		go s.write(&cborplugin.Response{ID: r.ID, SURB: r.SURB, Payload: payload})

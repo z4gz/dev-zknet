@@ -102,11 +102,12 @@ func sendRequest(thin *thin.ThinClient, httpRequestBytes []byte) ([]byte, error)
 	// Select a target service node and compute the DestinationIdHash
 	target, err := thin.GetService(ProxyHTTPService)
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("thin.GetService failed: %w", err)
 	}
 	nodeId := hash.Sum256(target.MixDescriptor.IdentityKey)
 
-	timeoutCtx, _ := context.WithTimeout(context.TODO(), time.Duration(timeout)*time.Second)
+	timeoutCtx, cancel := context.WithTimeout(context.TODO(), time.Duration(timeout)*time.Second)
+	defer cancel()
 	return thin.BlockingSendMessage(timeoutCtx, blob, &nodeId, target.RecipientQueueID)
 }
 
