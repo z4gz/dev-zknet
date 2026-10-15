@@ -2,6 +2,7 @@ packages:
   - apps/*
   - libs/*
   - packages/*
+  - packages/anon-rpc/*
 allowBuilds:
   nx: true
   esbuild: false

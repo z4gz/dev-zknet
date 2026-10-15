@@ -14,6 +14,12 @@
     },
     {
       "path": "./apps/client"
+    },
+    {
+      "path": "./packages/anon-rpc/transport"
+    },
+    {
+      "path": "./packages/anon-rpc/worker"
     }
   ]
 }
