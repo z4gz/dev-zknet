@@ -39,6 +39,7 @@ to it automatically).
 | `deploy`                           | deploys the specifier (idempotent), prints its address                                            |
 | `verify`                           | reads the specifier back and boot-resolves it as a harness does                                   |
 | `e2e`                              | the whole loop on its own ports, then stops everything                                            |
+| `demo-up` / `demo-down`            | the backend for trying the worker in the anon-rpc demo site (see `@zknet/anon-rpc-e2e`'s README)  |
 
 Arguments after `--` reach the script, e.g.
 `nx run @zknet/anon-rpc-specifier:hash --bundle=fixtures/keccak/19/4f04…`.

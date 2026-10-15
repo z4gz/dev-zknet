@@ -141,6 +141,23 @@
         "command": "node scripts/e2e.mjs",
         "cwd": "{projectRoot}"
       }
+    },
+    "demo-up": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "dependsOn": ["@zknet/anon-rpc-worker:build"],
+      "options": {
+        "command": "node scripts/demo.mjs up",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "demo-down": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node scripts/demo.mjs down",
+        "cwd": "{projectRoot}"
+      }
     }
   }
 }
