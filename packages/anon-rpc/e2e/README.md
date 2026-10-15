@@ -66,11 +66,11 @@ hash-pinned worker that fetches another loopback port, a `localhost` alias of Wa
 and a public host, and opens a WebSocket, is flagged on every count. A trap server confirms that
 the fetch and the WebSocket handshake really left the sandbox.
 
-**Known gap, pinned as an expected failure.** Chromium refuses a `fetch` that names a
-`targetAddressSpace` once it goes through a proxy ("the resource is in address space `unknown`"),
-and the transport names one on every WalletShield request. A browser that proxies the
-WalletShield address therefore gets `PeerUnreachable`. This is why the allowed origins go direct
-in the egress check. The test reports "unexpectedly passed" once that changes.
+**Proxied calls.** Chromium refuses a `fetch` that names a `targetAddressSpace` once it goes
+through a proxy ("the resource is in address space `unknown`"). The transport names none, so a
+browser that proxies the WalletShield address still reaches it; a test forces loopback through
+the proxy to keep it that way. The egress check still lets the allowed origins go direct and
+observes them on the browser layer.
 
 ### Fork
 

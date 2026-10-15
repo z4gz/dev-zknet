@@ -14,10 +14,10 @@
 // goes direct. They do not include a worker's WebSockets, which is why no
 // origin a WebSocket could use is left unproxied.
 //
-// Why allowed origins go direct: Chromium refuses a fetch that names a
-// `targetAddressSpace` once it goes through a proxy (the resource's address
-// space is then "unknown"), and the ZKNet transport names one on every
-// WalletShield request. Proxying WalletShield would break the worker under test.
+// Allowed origins go direct and are observed on the browser layer. Proxying
+// them works too: the transport names no `targetAddressSpace`, which Chromium
+// would refuse once proxied (tests/egress.spec.ts forces loopback through the
+// proxy to keep it that way).
 
 import { createServer, request as httpRequest, type IncomingMessage, type Server } from 'node:http';
 import { connect, isIPv4, type AddressInfo, type Socket } from 'node:net';
