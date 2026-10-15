@@ -99,6 +99,59 @@ Asserted:
 
 The last two skip on a host without an RFC 1918 IPv4 address.
 
+## See it yourself: the anon-rpc demo site
+
+The EF demo site boots any worker by its specifier. `nx run @zknet/anon-rpc-specifier:demo-up`
+gives it one on this machine; `demo-down` stops it.
+
+What `demo-up` does:
+
+- builds the worker;
+- starts anvil on `127.0.0.1:8545` and the keccak resolver on `127.0.0.1:8546`;
+- deploys a `WorkerSpecifier` pinning the bundle, or moves it with `setWorker` when the bundle
+  changed;
+- reads it back and fetches the bundle the way a harness does;
+- prints what to type into the demo.
+
+It is idempotent. The specifier is deployed from anvil's account #9, so on a fresh anvil it is
+always `0x700b6A60ce7EaaEA56F065753d8dcB9653dbAD35`; that address is what the `zknet-local`
+preset below names. `DEMO_WALLETSHIELD` and `DEMO_NETWORK` change the printed worker config.
+
+| Demo field    | Value                                                                                                                                            |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Worker        | "ZKNet (local anvil)" on the `zknet/local-dev` site, or "Custom" with the address below                                                          |
+| Specifier     | `0x700b6A60ce7EaaEA56F065753d8dcB9653dbAD35`                                                                                                     |
+| Bootstrap     | `http://127.0.0.1:8545` (chain 31337)                                                                                                            |
+| Worker RPC    | `http://zknet.invalid/ethereum-rpc`: any http(s) URL whose path is `/ethereum-rpc`; the worker matches the path only and never contacts the host |
+| Worker config | `{"walletshield":"http://127.0.0.1:7070","network":"ethereum"}`; `network` is a key of the exit's `[Networks]`                                   |
+
+The site comes from the anon-rpc fork's dev-only branch `zknet/local-dev`. It adds chain 31337
+and the `zknet-local` preset, which also carries `network.policy`. Build and serve it locally:
+
+```sh
+cd anon-rpc/impl && npm ci && npm run build && cd site && npx vite preview --host localhost --port 4173
+# open http://localhost:4173/demo/?worker=zknet-local
+```
+
+A page on `http://localhost` is not gated by Local Network Access, so it needs no prompt.
+
+The same build deployed to a public `https:` origin, e.g. Cloudflare Pages, works too:
+
+- build command `cd impl && npm ci && npm run build`, output `impl/site/dist`;
+- the browser then asks for local network access on the first request to `127.0.0.1`: allow it;
+- if the bootstrap field is still empty afterwards (its prefill was refused before you answered),
+  reload the page.
+
+anvil and the resolver answer any origin's CORS.
+
+The browser must reach this machine's `127.0.0.1:8545`, `127.0.0.1:8546` and WalletShield. If it
+runs elsewhere (for example, this shell is in a container), forward those ports so they appear on
+the browser's own `127.0.0.1`: the specifier records the resolver URL as `http://127.0.0.1:8546/…`.
+
+The "Local file" drop is no substitute. A dropped file is read only after the drop, so a drag from
+a source the browser cannot read at that path fails, upstream with an unhandled `NotFoundError`.
+The fix is on the fork's `fix/demo-local-file`.
+
 ## Live tier
 
 For a human with a running ZKNet dev mixnet. Nothing here starts one.
