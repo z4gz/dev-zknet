@@ -28,6 +28,18 @@ See [Run the clients locally](#run-the-clients-locally).
 `http-proxy` is one project for a library plus its `cmd/http_proxy` binary, not one per
 file.
 
+The [anon-rpc](https://github.com/ethereum/anon-rpc) worker, which lets a wallet send RPC
+through ZKNet from a browser, lives in `packages/anon-rpc`:
+
+| Project                     | Root                          | Targets                                                                                                                              |
+| --------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `@zknet/anon-rpc-transport` | `packages/anon-rpc/transport` | `test`, `typecheck`                                                                                                                  |
+| `@zknet/anon-rpc-worker`    | `packages/anon-rpc/worker`    | `build`, `test`, `typecheck`                                                                                                         |
+| `@zknet/anon-rpc-specifier` | `packages/anon-rpc/specifier` | `compile`, `test`, `hash`, `reproducible`, `resolver-start`, `resolver-stop`, `anvil-start`, `anvil-stop`, `deploy`, `verify`, `e2e` |
+| `@zknet/anon-rpc-e2e`       | `packages/anon-rpc/e2e`       | `e2e`, `e2e-fork`, `live`                                                                                                            |
+
+Each has a README with the details.
+
 ### Nx wraps the existing Make targets — it does not replace them
 
 Every target is `nx:run-commands` around a recipe that already exists:
