@@ -2,6 +2,7 @@ package http_proxy
 
 import (
 	"errors"
+	"net/http"
 	"os"
 
 	"github.com/BurntSushi/toml"
@@ -20,6 +21,57 @@ type Response struct {
 
 	// Error if not empty indicates an error condition.
 	Error string
+
+	// The fields below were added after Payload and Error. They are omitted
+	// when empty, so an old peer neither sends nor expects them: an old
+	// decoder ignores unknown CBOR map keys, and a new decoder reads their
+	// absence as the zero value.
+
+	// Reason classifies Error as one of the Reason* values.
+	Reason string `cbor:",omitempty"`
+
+	// Status is the upstream HTTP status code; 0 means the exit did not
+	// report one.
+	Status int `cbor:",omitempty"`
+
+	// Header holds the upstream response headers named by RelayedHeaders.
+	Header http.Header `cbor:",omitempty"`
+}
+
+// ErrorHeader marks a reply that WalletShield or the exit originated rather
+// than relayed from the upstream. Its value is one of the Reason* values.
+const ErrorHeader = "ZKNet-Error"
+
+// Reasons a reply was originated instead of relayed.
+const (
+	ReasonMixTimeout          = "mix-timeout"
+	ReasonExitRefused         = "exit-refused"
+	ReasonUpstreamUnreachable = "upstream-unreachable"
+	ReasonTooLarge            = "too-large"
+	ReasonBadReply            = "bad-reply"
+)
+
+// RelayedHeaders lists the upstream response headers carried back across the
+// mixnet. Every other upstream header is dropped.
+var RelayedHeaders = []string{
+	"Content-Type",
+	"Retry-After",
+}
+
+// FilterHeaders returns the RelayedHeaders present in h. ErrorHeader is never
+// returned, so an upstream cannot impersonate an originated failure.
+func FilterHeaders(h http.Header) http.Header {
+	out := http.Header{}
+	for _, name := range RelayedHeaders {
+		key := http.CanonicalHeaderKey(name)
+		if key == ErrorHeader {
+			continue
+		}
+		if v, ok := h[key]; ok {
+			out[key] = v
+		}
+	}
+	return out
 }
 
 type Config struct {

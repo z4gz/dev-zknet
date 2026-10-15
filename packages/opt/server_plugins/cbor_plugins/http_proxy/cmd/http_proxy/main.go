@@ -124,7 +124,7 @@ func (s *proxyRequestHandler) OnCommand(cmd cborplugin.Command) error {
 		if r.SURB == nil {
 			errMsg := "no SURB, cannot reply"
 			s.log.Error(errMsg)
-			return s.sendError(r.ID, r.SURB, errMsg)
+			return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, errMsg)
 		}
 
 		// the padding bytes were not stripped because
@@ -137,7 +137,7 @@ func (s *proxyRequestHandler) OnCommand(cmd cborplugin.Command) error {
 		err := dec.Decode(req)
 		if err != nil {
 			s.log.Errorf("dec.Decode(req) failed: %s", err)
-			return s.sendError(r.ID, r.SURB, "Error decoding request")
+			return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, "Error decoding request")
 		}
 
 		s.log.Debugf("Raw request payload: %s", req.Payload)
@@ -145,12 +145,12 @@ func (s *proxyRequestHandler) OnCommand(cmd cborplugin.Command) error {
 		requestPayload, err := common.DecompressData(req.Payload)
 		if err != nil {
 			s.log.Errorf("common.DecompressData failed: %s", err)
-			return s.sendError(r.ID, r.SURB, "Failed to decompress request")
+			return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, "Failed to decompress request")
 		}
 		request, err := http.ReadRequest(bufio.NewReader(bytes.NewReader(requestPayload)))
 		if err != nil {
 			s.log.Errorf("http.ReadRequest failed: %s", err)
-			return s.sendError(r.ID, r.SURB, "Failed to read HTTP request")
+			return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, "Failed to read HTTP request")
 		}
 
 		s.log.Debugf("Request URL Path: %s", request.URL.Path)
@@ -159,7 +159,7 @@ func (s *proxyRequestHandler) OnCommand(cmd cborplugin.Command) error {
 		err = validateRequestURL(request.URL.Path)
 		if err != nil {
 			s.log.Errorf("validateRequestURL failed: %s", err)
-			return s.sendError(r.ID, r.SURB, fmt.Sprintf("validateRequestURL failed: %s", err.Error()))
+			return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, fmt.Sprintf("validateRequestURL failed: %s", err.Error()))
 		}
 
 		if match, _ := regexp.MatchString("^/_/probe.*", request.URL.Path); match {
@@ -180,13 +180,13 @@ func (s *proxyRequestHandler) OnCommand(cmd cborplugin.Command) error {
 		target, ok := s.cfg.Networks[uri]
 		if !ok {
 			s.log.Error("URI not matched with config Networks")
-			return s.sendError(r.ID, r.SURB, "URI not configured in networks")
+			return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, "URI not configured in networks")
 		}
 
 		newRequest, err := http.NewRequest(request.Method, target, request.Body)
 		if err != nil {
 			s.log.Errorf("http.NewRequest failed: %s", err)
-			return s.sendError(r.ID, r.SURB, "Failed to create HTTP request")
+			return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, "Failed to create HTTP request")
 		}
 
 		newRequest.Header.Set("Content-Type", request.Header.Get("Content-Type"))
@@ -195,39 +195,37 @@ func (s *proxyRequestHandler) OnCommand(cmd cborplugin.Command) error {
 		resp, err := http.DefaultClient.Do(newRequest)
 		if err != nil {
 			s.log.Errorf("http.DefaultClient.Do failed: %s", err)
-			return s.sendError(r.ID, r.SURB, "HTTP request failed")
+			return s.sendError(r.ID, r.SURB, http_proxy.ReasonUpstreamUnreachable, "HTTP request failed")
 		}
 		defer resp.Body.Close()
-
-		resp.Header["Host"] = []string{request.URL.Host}
 
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			s.log.Errorf("io.ReadAll(resp.Body) failed: %s", err)
-			return s.sendError(r.ID, r.SURB, fmt.Sprintf("io.ReadAll(resp.Body) failed: %s", err.Error()))
+			return s.sendError(r.ID, r.SURB, http_proxy.ReasonUpstreamUnreachable, fmt.Sprintf("io.ReadAll(resp.Body) failed: %s", err.Error()))
 		}
 
-		s.log.Debugf("Reply payload: %s", body)
+		s.log.Debugf("Reply status %d, payload: %s", resp.StatusCode, body)
 
-		var response *http_proxy.Response
 		responsePayload, err := common.CompressData(body)
 		if err != nil {
 			s.log.Errorf("common.CompressData failed: %s", err)
-			return s.sendError(r.ID, r.SURB, "Failed to compress response")
+			return s.sendError(r.ID, r.SURB, http_proxy.ReasonUpstreamUnreachable, "Failed to compress response")
 		}
 		if len(responsePayload) > MaxPayloadSize {
 			s.log.Error("HTTP response body exceeds max Sphinx payload")
-			return s.sendError(r.ID, r.SURB, "HTTP response is too big")
-		} else {
-			response = &http_proxy.Response{
-				Payload: responsePayload,
-			}
+			return s.sendError(r.ID, r.SURB, http_proxy.ReasonTooLarge, "HTTP response is too big")
+		}
+		response := &http_proxy.Response{
+			Payload: responsePayload,
+			Status:  resp.StatusCode,
+			Header:  http_proxy.FilterHeaders(resp.Header),
 		}
 
 		payload, err := cbor.Marshal(response)
 		if err != nil {
 			s.log.Errorf("cbor.Marshal(response) failed: %s", err)
-			return s.sendError(r.ID, r.SURB, "Error marshaling response")
+			return s.sendError(r.ID, r.SURB, http_proxy.ReasonUpstreamUnreachable, "Error marshaling response")
 		}
 
 		go s.write(&cborplugin.Response{ID: r.ID, SURB: r.SURB, Payload: payload})
@@ -239,8 +237,10 @@ func (s *proxyRequestHandler) OnCommand(cmd cborplugin.Command) error {
 	}
 }
 
-func (s *proxyRequestHandler) sendError(id uint64, surb []byte, msg string) error {
-	payload, _ := cbor.Marshal(&http_proxy.Response{Error: msg})
+// sendError replies with an exit-originated failure. reason is one of the
+// http_proxy.Reason* values.
+func (s *proxyRequestHandler) sendError(id uint64, surb []byte, reason, msg string) error {
+	payload, _ := cbor.Marshal(&http_proxy.Response{Error: msg, Reason: reason})
 	go s.write(&cborplugin.Response{ID: id, SURB: surb, Payload: payload})
 	return errors.New(msg)
 }
