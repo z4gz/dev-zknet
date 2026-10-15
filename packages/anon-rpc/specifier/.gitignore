@@ -1,0 +1,5 @@
+# forge
+out/
+cache/
+# local loop: pid files, logs, resolver store, deployment records, reproducibility outputs
+.state/

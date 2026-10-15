@@ -1,0 +1,146 @@
+{
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "name": "@zknet/anon-rpc-specifier",
+  "projectType": "library",
+  "tags": ["scope:anon-rpc"],
+  "targets": {
+    "compile": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["{projectRoot}/src/**/*.sol", "{projectRoot}/foundry.toml"],
+      "outputs": ["{projectRoot}/out"],
+      "options": {
+        "command": "node scripts/foundry.mjs forge build",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "test-sol": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": [
+        "{projectRoot}/src/**/*.sol",
+        "{projectRoot}/test/**/*.sol",
+        "{projectRoot}/foundry.toml"
+      ],
+      "options": {
+        "command": "node scripts/foundry.mjs forge test",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "test-js": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": [
+        "{projectRoot}/scripts/**/*.mjs",
+        "{projectRoot}/tests/**/*.mjs",
+        "{projectRoot}/fixtures/**/*"
+      ],
+      "options": {
+        "command": "node --test 'tests/*.test.mjs'",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "test": {
+      "executor": "nx:noop",
+      "dependsOn": ["test-sol", "test-js"]
+    },
+    "fmt-check": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["{projectRoot}/test/**/*.sol", "{projectRoot}/foundry.toml"],
+      "options": {
+        "command": "node scripts/foundry.mjs forge fmt --check test/ReferenceBytecode.t.sol test/WorkerSpecifierEvents.t.sol test/utils",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "hash": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node scripts/hash.mjs --write",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "reproducible": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node scripts/reproducible.mjs",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "resolver": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "continuous": true,
+      "options": {
+        "command": "node scripts/resolver.mjs serve",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "resolver-put": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node scripts/resolver.mjs put",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "resolver-start": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node scripts/resolver.mjs start",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "resolver-stop": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node scripts/resolver.mjs stop",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "anvil-start": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node scripts/anvil.mjs start",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "anvil-stop": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node scripts/anvil.mjs stop",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "deploy": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node scripts/deploy.mjs",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "verify": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node scripts/verify.mjs",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "e2e": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node scripts/e2e.mjs",
+        "cwd": "{projectRoot}"
+      }
+    }
+  }
+}

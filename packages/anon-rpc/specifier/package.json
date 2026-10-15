@@ -1,0 +1,11 @@
+{
+  "name": "@zknet/anon-rpc-specifier",
+  "version": "0.0.0",
+  "private": true,
+  "description": "On-chain worker specifier (anon-rpc SPEC §4) for the ZKNet anon-rpc worker: EF's reference WorkerSpecifier, bundle hashing, a local keccak resolver and an anvil deploy loop. Foundry plus Node built-ins only.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  }
+}
