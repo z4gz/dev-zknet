@@ -6,13 +6,18 @@
 // `verify` is the harness's check that the bundle resolves.
 //
 // Usage:
-//   node scripts/verify-source.mjs --tier test|prod [--address <addr>] [--config <file>] [--records <dir>] [--dry-run]
+//   node scripts/verify-source.mjs --tier test|prod [--address <addr>] [--config <file>] [--records <dir>] [--posted <dir>] [--dry-run]
 
 import { spawnSync } from 'node:child_process';
 import { parseArgs } from 'node:util';
-import { LOCAL_CONFIG, PROJECT_DIR, RECORDS_DIR } from './lib/paths.mjs';
+import {
+  LOCAL_CONFIG,
+  POSTED_RECORDS_DIR,
+  PROJECT_DIR,
+  WORKING_RECORDS_DIR,
+} from './lib/paths.mjs';
 import { CliError, foundry, isMain, runMain } from './lib/proc.mjs';
-import { readRecord, recordPath } from './lib/record.mjs';
+import { findRecord } from './lib/record.mjs';
 import { chainId } from './lib/rpc.mjs';
 import { assertChain, banner, loadTierConfig, tierOf } from './lib/tiers.mjs';
 
@@ -43,7 +48,8 @@ async function main(argv) {
       tier: { type: 'string' },
       address: { type: 'string' },
       config: { type: 'string', default: LOCAL_CONFIG },
-      records: { type: 'string', default: RECORDS_DIR },
+      records: { type: 'string', default: WORKING_RECORDS_DIR },
+      posted: { type: 'string', default: POSTED_RECORDS_DIR },
       'dry-run': { type: 'boolean', default: false },
     },
   });
@@ -56,8 +62,12 @@ async function main(argv) {
   assertChain(tier, await chainId(rpcUrl));
   const address =
     values.address ??
-    readRecord(recordPath(/** @type {string} */ (values.records), tier.name))?.address;
-  if (!address) throw new CliError(`no --address and no deployments/${tier.name}.json`);
+    findRecord(
+      tier.name,
+      /** @type {string} */ (values.records),
+      /** @type {string} */ (values.posted),
+    ).record?.address;
+  if (!address) throw new CliError(`no --address and no working or posted record for ${tier.name}`);
 
   const args = verifyArgs(address, tier.chainId, rpcUrl);
   // The RPC URL may carry an API key: show the command without it.

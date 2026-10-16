@@ -5,13 +5,13 @@
 // records what it proved, so `deploy` can refuse a bundle no gate has seen.
 //
 // Usage:
-//   node scripts/preflight.mjs --tier dev|test|prod [--bundle <path>] [--records <dir>]
+//   node scripts/preflight.mjs --tier dev|test|prod [--bundle <path>] [--posted <dir>]
 //
 //   dev   nothing more: the cached graph is the whole gate
 //   test  the bundle must equal a build from a clean export of HEAD, so the
 //         pinned hash maps to a commit; records HEAD and whether the tree was dirty
 //   prod  test, plus: an empty `git status --porcelain`, on `main`, HEAD on a
-//         remote branch, and deployments/test.json already pinning this bundle
+//         remote branch, and the posted deployments/test.json already pinning this bundle
 //
 // Writes .state/preflight/<tier>.json: { tier, workerHash, bytes, gitCommit, dirty, at }.
 
@@ -20,7 +20,7 @@ import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { digestFile } from './lib/digest.mjs';
 import { branch, head, porcelain, remotesContainingHead } from './lib/git.mjs';
-import { DEFAULT_BUNDLE, PREFLIGHT_DIR, RECORDS_DIR } from './lib/paths.mjs';
+import { DEFAULT_BUNDLE, POSTED_RECORDS_DIR, PREFLIGHT_DIR } from './lib/paths.mjs';
 import { CliError, isMain, runMain } from './lib/proc.mjs';
 import { readRecord, recordPath } from './lib/record.mjs';
 import { banner, tierOf } from './lib/tiers.mjs';
@@ -73,7 +73,7 @@ async function main(argv) {
         type: 'string',
         default: process.env.WORKER_BUNDLE || DEFAULT_BUNDLE,
       },
-      records: { type: 'string', default: RECORDS_DIR },
+      posted: { type: 'string', default: POSTED_RECORDS_DIR },
     },
   });
   const tier = tierOf(values.tier);
@@ -89,7 +89,7 @@ async function main(argv) {
       porcelain: dirtyStatus,
       branch: branch(),
       remotes: remotesContainingHead(),
-      testWorkerHash: readRecord(recordPath(/** @type {string} */ (values.records), 'test'))
+      testWorkerHash: readRecord(recordPath(/** @type {string} */ (values.posted), 'test'))
         ?.workerHash,
       workerHash: digest.keccak256,
     });

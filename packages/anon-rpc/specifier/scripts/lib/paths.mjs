@@ -24,8 +24,11 @@ export const STATE_DIR = join(PROJECT_DIR, '.state');
 export const RESOLVER_STORE = join(STATE_DIR, 'keccak');
 export const DEPLOYMENTS_DIR = join(STATE_DIR, 'deployments');
 
-/** Committed records of the public tiers: deployments/<tier>.json. */
-export const RECORDS_DIR = join(PROJECT_DIR, 'deployments');
+/** Working records of the public tiers (untracked): what deploy reads and writes. */
+export const WORKING_RECORDS_DIR = join(STATE_DIR, 'records');
+
+/** Posted records of the public tiers (committed by hand): deployments/<tier>.json. */
+export const POSTED_RECORDS_DIR = join(PROJECT_DIR, 'deployments');
 
 /** Untracked per-machine config of the public tiers (see deploy.local.example.json). */
 export const LOCAL_CONFIG = join(PROJECT_DIR, 'deploy.local.json');

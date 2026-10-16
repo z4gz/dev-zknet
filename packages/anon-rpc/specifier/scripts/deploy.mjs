@@ -8,7 +8,8 @@
 //                           [--from <addr>] [--account <name> | --keystore <path>] [--password-file <path>]
 //                           [--deployments <dir>] [--update] [--fresh] [--dry-run] [--skip-resolver-check]
 //   public tiers add:       [--broadcast] [--rehearse [--deployer <addr>] [--fork-port N]]
-//                           [--config <file>] [--records <dir>] [--preflight <dir>] [--rehearse-record <file>]
+//                           [--address <addr>] [--config <file>] [--records <dir>] [--posted <dir>]
+//                           [--preflight <dir>] [--rehearse-record <file>]
 //
 // Without --tier (how e2e and demo-up call it) every chain-facing value is an
 // input, so a public testnet is configuration:
@@ -35,15 +36,20 @@
 //   - is a dry run unless --broadcast. With --broadcast it signs with the
 //     keystore through Foundry's own password prompt: one prompt per
 //     transaction, answered on the terminal, never seen by this script;
-//   - keeps its record in the committed deployments/<tier>.json, written only
-//     after a broadcast passes read-back. Committing it is the operator's step.
+//   - acts on a working record, .state/records/<tier>.json (untracked), or,
+//     without one, on the posted deployments/<tier>.json; it writes only the
+//     working record, after a broadcast passes read-back. Posting it (copying
+//     it to deployments/ and committing) is the operator's step;
+//   - --address <addr> targets an existing specifier instead of the record's:
+//     it must hold the EF reference code and be owned by the configured
+//     deployer, and the record that results is the working one;
 //   --rehearse runs the whole deploy on a local anvil fork of the tier's chain,
 //     impersonating the deployer: no key, nothing sent to the real chain. It
 //     reports gas, read-back and boot-resolve, and writes its would-be record
 //     to .state/rehearse/<tier>.json.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { parseArgs } from 'node:util';
 import { digestFile } from './lib/digest.mjs';
 import { head } from './lib/git.mjs';
@@ -53,19 +59,22 @@ import {
   DEFAULT_RPC_URL,
   DEPLOYMENTS_DIR,
   LOCAL_CONFIG,
+  POSTED_RECORDS_DIR,
+  PROJECT_DIR,
   PREFLIGHT_DIR,
-  RECORDS_DIR,
   STATE_DIR,
+  WORKING_RECORDS_DIR,
 } from './lib/paths.mjs';
 import { CliError, Daemon, foundry, isMain, run, runMain, runSigning } from './lib/proc.mjs';
 import {
   createdRecord,
-  readRecord,
+  findRecord,
   recordPath,
   updatedRecord,
   writeRecord,
 } from './lib/record.mjs';
-import { answers, chainId as getChainId, rpc } from './lib/rpc.mjs';
+import { keccak256Hex } from './lib/keccak.mjs';
+import { answers, chainId as getChainId, code, rpc } from './lib/rpc.mjs';
 import { checkResolver, readSpecifier, REFERENCE_CODEHASH, sameList } from './lib/specifier.mjs';
 import { assertChain, banner, expandResolvers, loadTierConfig, tierOf } from './lib/tiers.mjs';
 import { readProof } from './preflight.mjs';
@@ -285,7 +294,9 @@ async function main(argv) {
       deployer: { type: 'string' },
       'fork-port': { type: 'string', default: '8549' },
       config: { type: 'string', default: LOCAL_CONFIG },
-      records: { type: 'string', default: RECORDS_DIR },
+      records: { type: 'string', default: WORKING_RECORDS_DIR },
+      posted: { type: 'string', default: POSTED_RECORDS_DIR },
+      address: { type: 'string' },
       preflight: { type: 'string', default: PREFLIGHT_DIR },
       'rehearse-record': { type: 'string' },
     },
@@ -305,8 +316,10 @@ async function main(argv) {
  * @param {Record<string, any>} values
  */
 async function localChain(tier, values) {
-  if (values.broadcast || values.rehearse || values.deployer)
-    throw new CliError('--broadcast, --rehearse and --deployer belong to the public tiers');
+  if (values.broadcast || values.rehearse || values.deployer || values.address)
+    throw new CliError(
+      '--broadcast, --rehearse, --deployer and --address belong to the public tiers',
+    );
   const rpcUrl = values['rpc-url'] || process.env.RPC_URL || DEFAULT_RPC_URL;
   const bundle = values.bundle;
   const dir = values.deployments;
@@ -436,9 +449,20 @@ async function publicTier(tier, values) {
   const chainId = await getChainId(config.rpcUrl);
   assertChain(tier, chainId);
   const file = recordPath(values.records, tier.name);
-  const record = readRecord(file);
+  const found = findRecord(tier.name, values.records, values.posted);
+  /** @type {import('./lib/record.mjs').TierRecord | undefined} */
+  let record;
+  let target;
+  if (values.address) {
+    target = await checkTarget(config.rpcUrl, values.address, deployer);
+    // The record still applies when it names the same contract.
+    if (found.record?.address.toLowerCase() === target.toLowerCase()) record = found.record;
+  } else {
+    record = found.record;
+    target = record?.address;
+  }
   if (record && record.chainId !== tier.chainId)
-    throw new CliError(`${file} is for chain ${record.chainId}, not ${tier.chainId}`);
+    throw new CliError(`${found.file} is for chain ${record.chainId}, not ${tier.chainId}`);
 
   console.log(
     `bundle ${bundle} (${digest.bytes} bytes) from ${gitCommit.slice(0, 12)}${proof.dirty ? ' (tree dirty)' : ''}`,
@@ -446,7 +470,16 @@ async function publicTier(tier, values) {
   console.log(`workerHash ${workerHash}`);
   for (const r of resolvers) console.log(`resolver ${r}`);
   console.log(`signer ${deployer}${values.deployer ? ' (rehearsal stand-in)' : ''}`);
-  console.log(`record ${record ? `${record.address} pins ${record.workerHash}` : 'none yet'}`);
+  if (record)
+    console.log(
+      `record ${relative(PROJECT_DIR, found.file ?? '')}: ${record.address} pins ${record.workerHash}`,
+    );
+  else
+    console.log(target ? `target ${target} (--address; no record for it yet)` : 'record none yet');
+  if (found.posted && !values.address)
+    console.log(
+      `note: the posted deployments/${tier.name}.json names ${found.posted.address}; the working record wins (pass --address to choose)`,
+    );
 
   const bundleRef = {
     file: bundle.split('/').pop() ?? bundle,
@@ -458,12 +491,13 @@ async function publicTier(tier, values) {
     workerHash,
     resolvers,
     deployer,
-    known: record?.address,
+    known: target,
     onMissing: /** @type {const} */ ('refuse'),
     update: values.update,
     fresh: values.fresh,
     skipResolverCheck: values['skip-resolver-check'],
-    hint: '',
+    // Carried into every re-run line printed, so it names the same contract.
+    hint: values.address ? ` --address ${values.address}` : '',
   };
 
   if (values.rehearse) {
@@ -486,21 +520,28 @@ async function publicTier(tier, values) {
     signer: ['--account', config.account, '--from', deployer],
     dryRun,
     sign: runSigning,
-    hint: ` (nx run @zknet/anon-rpc-specifier:deploy:${tier.name} --update)`,
+    hint: ` (nx run @zknet/anon-rpc-specifier:deploy:${tier.name} --update${common.hint})`,
   });
   if (outcome.action === 'dry-run') {
     const flags = [
       '--broadcast',
       ...(values.update ? ['--update'] : []),
       ...(values.fresh ? ['--fresh'] : []),
+      ...(values.address ? ['--address', values.address] : []),
     ];
     console.log(`\nnothing sent. To send it (one keystore password prompt per transaction):`);
     console.log(`  nx run @zknet/anon-rpc-specifier:deploy:${tier.name} ${flags.join(' ')}`);
     return;
   }
-  if (outcome.action === 'noop') return;
+  // A no-op writes nothing, unless a broadcast run adopts a contract (an --address,
+  // or the posted record) as the working record. A dry run never writes.
+  if (outcome.action === 'noop' && (dryRun || (record === found.record && found.file === file)))
+    return;
   writeRecord(file, nextRecord(tier, chainId, outcome, record, bundleRef, workerHash, deployer));
-  console.log(`✓ wrote ${file}: review it, then commit it`);
+  console.log(`✓ wrote the working record ${relative(PROJECT_DIR, file)}`);
+  console.log(
+    `  to post it: cp ${relative(PROJECT_DIR, file)} deployments/${tier.name}.json, review, git add, commit`,
+  );
   console.log(outcome.address);
 }
 
@@ -518,18 +559,62 @@ async function publicTier(tier, values) {
 export function nextRecord(tier, chainId, outcome, record, bundle, workerHash, owner) {
   const tx = /** @type {string} */ (outcome.tx);
   const block = /** @type {number} */ (outcome.block);
-  if (outcome.action === 'updated' && record)
-    return updatedRecord(record, { tx, block, workerHash, bundle, owner });
-  return createdRecord({
+  const address = /** @type {string} */ (outcome.address);
+  if (outcome.action === 'created')
+    return createdRecord({
+      tier: tier.name,
+      chainId,
+      address,
+      codehash: REFERENCE_CODEHASH,
+      owner,
+      creation: { tx, block },
+      workerHash,
+      bundle,
+    });
+  // An --address with no record starts one from what the chain showed; it has no creation.
+  /** @type {import('./lib/record.mjs').TierRecord} */
+  const base = record ?? {
     tier: tier.name,
     chainId,
-    address: /** @type {string} */ (outcome.address),
+    address,
+    contract: 'WorkerSpecifier',
     codehash: REFERENCE_CODEHASH,
     owner,
-    creation: { tx, block },
     workerHash,
     bundle,
-  });
+    updates: [],
+  };
+  if (outcome.action !== 'updated') return { ...base, owner, workerHash, bundle };
+  return updatedRecord(base, { tx, block, workerHash, bundle, owner });
+}
+
+/**
+ * An --address must be a specifier this deployer can update: the EF reference
+ * code, owned by the configured deployer.
+ * @param {string} rpcUrl
+ * @param {string} address
+ * @param {string} deployer
+ * @returns {Promise<string>} the address
+ */
+async function checkTarget(rpcUrl, address, deployer) {
+  if (!/^0x[0-9a-fA-F]{40}$/.test(address))
+    throw new CliError(`--address ${address} is not an address`);
+  // Code first: a contract that is not a specifier cannot answer workerHash().
+  const runtime = await code(rpcUrl, address);
+  if (runtime === '0x') throw new CliError(`--address ${address} holds no code on this chain`);
+  const codehash = keccak256Hex(Buffer.from(runtime.slice(2), 'hex'));
+  if (codehash !== REFERENCE_CODEHASH)
+    throw new CliError(
+      `--address ${address} is not the EF reference WorkerSpecifier (codehash ${codehash})`,
+    );
+  const spec = /** @type {NonNullable<Awaited<ReturnType<typeof readSpecifier>>>} */ (
+    await readSpecifier(rpcUrl, address)
+  );
+  if (spec.owner.toLowerCase() !== deployer.toLowerCase())
+    throw new CliError(
+      `--address ${address} is owned by ${spec.owner}, not the configured deployer ${deployer}`,
+    );
+  return address;
 }
 
 /**
@@ -586,7 +671,7 @@ async function rehearse(tier, upstream, port, common, record, bundleRef, bundle,
       signer: ['--unlocked', '--from', common.deployer],
       dryRun: false,
       sign: run,
-      hint: ` (nx run @zknet/anon-rpc-specifier:deploy:${tier.name} --rehearse --update)`,
+      hint: ` (nx run @zknet/anon-rpc-specifier:deploy:${tier.name} --rehearse --update${common.hint})`,
     });
     if (outcome.action !== 'noop') {
       const cost = /** @type {bigint} */ (outcome.cost);

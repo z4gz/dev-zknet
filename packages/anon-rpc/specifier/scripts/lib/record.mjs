@@ -1,11 +1,18 @@
-// The committed deployment record of a public tier: deployments/<tier>.json.
+// The deployment record of a public tier.
 //
 // It names what is live: address, chain, contract, owner, creation, the pinned
 // workerHash and the commit the bundle was built from. It never holds resolver
 // URLs. `updates` is an append-only, informational history that the operator
-// curates by hand before committing (pruning test noise is expected), so no
-// code reads it: tooling depends on the top-level fields only, and a record
-// whose `updates` is missing or empty works the same.
+// curates by hand before posting (pruning test noise is expected), so no code
+// reads it: tooling depends on the top-level fields only, and a record whose
+// `updates` is missing or empty works the same.
+//
+// Two places hold one: the working record, .state/records/<tier>.json
+// (untracked), which deploy reads and writes; and the posted record,
+// deployments/<tier>.json, which the operator copies from the working one and
+// commits when a deployment is for public consumption. Nothing writes the
+// posted record. A record started from --address has no `creation`: the chain
+// holds it, and nothing here needs it.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -27,7 +34,7 @@ import { CliError } from './proc.mjs';
  * @property {string} contract
  * @property {string} codehash
  * @property {string} owner
- * @property {{ tx: string, block: number }} creation
+ * @property {{ tx: string, block: number }} [creation]  absent when the record was started from --address
  * @property {string} workerHash
  * @property {BundleRef} bundle
  * @property {{ tx: string, block: number, workerHash: string, gitCommit: string }[]} [updates]
@@ -47,7 +54,7 @@ export function checkRecord(record) {
     if (typeof r?.[key] !== 'string') throw new CliError(`record: ${key} missing`);
   }
   if (typeof r.chainId !== 'number') throw new CliError('record: chainId missing');
-  if (typeof (/** @type {any} */ (r.creation)?.tx) !== 'string')
+  if (r.creation !== undefined && typeof (/** @type {any} */ (r.creation)?.tx) !== 'string')
     throw new CliError('record: creation.tx missing');
   if ('resolvers' in r) throw new CliError('record: resolvers do not belong in a committed record');
   const url = JSON.stringify(record).match(/[a-z][a-z0-9+.-]*:\/\/[^"]*/i);
@@ -108,4 +115,33 @@ export function updatedRecord(previous, update) {
       },
     ],
   };
+}
+
+/**
+ * @typedef {object} FoundRecord
+ * @property {TierRecord} [record]  the record deploy acts on
+ * @property {string} [file]        where it was read from
+ * @property {TierRecord} [posted]  the posted record, when it names another address than the working one
+ */
+
+/**
+ * The record a public tier acts on: the working record when there is one,
+ * else the posted one. Callers print which file and address they used, so a
+ * plan always shows the contract it targets.
+ * @param {string} tier
+ * @param {string} workingDir
+ * @param {string} postedDir
+ * @returns {FoundRecord}
+ */
+export function findRecord(tier, workingDir, postedDir) {
+  const workingFile = recordPath(workingDir, tier);
+  const postedFile = recordPath(postedDir, tier);
+  const working = readRecord(workingFile);
+  const posted = readRecord(postedFile);
+  if (working) {
+    const differs = posted && posted.address.toLowerCase() !== working.address.toLowerCase();
+    return { record: working, file: workingFile, ...(differs ? { posted } : {}) };
+  }
+  if (posted) return { record: posted, file: postedFile };
+  return {};
 }

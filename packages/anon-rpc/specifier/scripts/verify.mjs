@@ -6,19 +6,25 @@
 //
 // Usage:
 //   node scripts/verify.mjs [--tier dev|test|prod] [--address <addr>] [--rpc-url <url>]
-//                           [--bundle <path>] [--deployments <dir>] [--config <file>] [--records <dir>]
+//                           [--bundle <path>] [--deployments <dir>] [--config <file>] [--records <dir>] [--posted <dir>]
 //
 // Without --address, the address comes from the record: <deployments>/<chainId>.json
-// locally, deployments/<tier>.json for a public tier (whose RPC URL comes from
-// deploy.local.json). A tier refuses an endpoint on another chain.
+// locally, for a public tier the working record .state/records/<tier>.json, else the
+// posted deployments/<tier>.json (its RPC URL comes from deploy.local.json). A tier refuses an endpoint on another chain.
 // Exits 1 unless at least one resolver admits the bundle and none serves
 // other bytes.
 
 import { parseArgs } from 'node:util';
 import { digestFile } from './lib/digest.mjs';
-import { DEFAULT_RPC_URL, DEPLOYMENTS_DIR, LOCAL_CONFIG, RECORDS_DIR } from './lib/paths.mjs';
+import {
+  DEFAULT_RPC_URL,
+  DEPLOYMENTS_DIR,
+  LOCAL_CONFIG,
+  POSTED_RECORDS_DIR,
+  WORKING_RECORDS_DIR,
+} from './lib/paths.mjs';
 import { CliError, isMain, runMain } from './lib/proc.mjs';
-import { readRecord, recordPath } from './lib/record.mjs';
+import { findRecord } from './lib/record.mjs';
 import { chainId } from './lib/rpc.mjs';
 import { checkResolver, readSpecifier, REFERENCE_CODEHASH } from './lib/specifier.mjs';
 import { assertChain, banner, loadTierConfig, tierOf } from './lib/tiers.mjs';
@@ -77,7 +83,8 @@ async function main(argv) {
       bundle: { type: 'string' },
       deployments: { type: 'string', default: DEPLOYMENTS_DIR },
       config: { type: 'string', default: LOCAL_CONFIG },
-      records: { type: 'string', default: RECORDS_DIR },
+      records: { type: 'string', default: WORKING_RECORDS_DIR },
+      posted: { type: 'string', default: POSTED_RECORDS_DIR },
     },
   });
   const tier = values.tier === undefined ? undefined : tierOf(values.tier);
@@ -94,7 +101,11 @@ async function main(argv) {
   const address =
     values.address ??
     (tier?.public
-      ? readRecord(recordPath(/** @type {string} */ (values.records), tier.name))?.address
+      ? findRecord(
+          tier.name,
+          /** @type {string} */ (values.records),
+          /** @type {string} */ (values.posted),
+        ).record?.address
       : readDeployment(/** @type {string} */ (values.deployments), id)?.address);
   if (!address) throw new CliError(`no --address and no recorded deployment for chain ${id}`);
   console.log(`chain ${id}`);

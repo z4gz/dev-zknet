@@ -11,6 +11,7 @@ import { FIXTURE_BUNDLE, PROJECT_DIR } from '../scripts/lib/paths.mjs';
 import {
   checkRecord,
   createdRecord,
+  findRecord,
   readRecord,
   updatedRecord,
   writeRecord,
@@ -111,7 +112,12 @@ test('the committed example config is valid JSON with test and prod sections, an
     spawnSync('git', ['check-ignore', '-q', f], { cwd: PROJECT_DIR }).status === 0;
   assert.equal(ignored('deploy.local.json'), true, 'the real config must be git-ignored');
   assert.equal(ignored('deploy.local.example.json'), false, 'the example must be committable');
-  assert.equal(ignored('deployments/test.json'), false, 'the record must be committable');
+  assert.equal(ignored('deployments/test.json'), false, 'the posted record must be committable');
+  assert.equal(
+    ignored('.state/records/test.json'),
+    true,
+    'the working record must stay out of git',
+  );
 });
 
 const BUNDLE = { file: 'w.js', bytes: 10, gitCommit: 'c1', dirty: false };
@@ -236,4 +242,62 @@ test('prod refuses a dirty tree, another branch, an unpushed HEAD, and a hash te
   assert.match(prodRefusals({ ...ok, remotes: [] }).join(), /no remote branch/);
   assert.match(prodRefusals({ ...ok, testWorkerHash: undefined }).join(), /does not exist/);
   assert.match(prodRefusals({ ...ok, testWorkerHash: H2 }).join(), /prod follows test/);
+});
+
+test('records: the working record wins over the posted one, and a differing posted one is reported', () => {
+  const working = tmp();
+  const posted = tmp();
+  const at = (/** @type {string} */ a) => ({ ...created(), address: a });
+  const A = '0x00000000000000000000000000000000000000a1';
+  const B = '0x00000000000000000000000000000000000000b2';
+  assert.deepEqual(findRecord('test', working, posted), {});
+
+  writeRecord(join(posted, 'test.json'), at(B));
+  const onlyPosted = findRecord('test', working, posted);
+  assert.equal(onlyPosted.record?.address, B);
+  assert.equal(onlyPosted.file, join(posted, 'test.json'));
+
+  writeRecord(join(working, 'test.json'), at(A));
+  const both = findRecord('test', working, posted);
+  assert.equal(both.record?.address, A);
+  assert.equal(both.file, join(working, 'test.json'));
+  assert.equal(both.posted?.address, B, 'a posted record naming another contract is surfaced');
+
+  writeRecord(join(posted, 'test.json'), at(A.toUpperCase().replace('0X', '0x')));
+  assert.equal(
+    findRecord('test', working, posted).posted,
+    undefined,
+    'same address: nothing to report',
+  );
+});
+
+test('record: one started from --address has no creation, and still updates', () => {
+  const { creation: _, ...noCreation } = created();
+  assert.doesNotThrow(() => checkRecord(noCreation));
+  const tier = tierOf('test');
+  const adopted = nextRecord(
+    tier,
+    11155111,
+    { action: 'noop', address: created().address },
+    undefined,
+    BUNDLE,
+    H1,
+    created().owner,
+  );
+  assert.equal(adopted.creation, undefined);
+  assert.equal(adopted.workerHash, H1);
+  assert.deepEqual(adopted.updates, []);
+  const updated = nextRecord(
+    tier,
+    11155111,
+    { action: 'updated', address: created().address, tx: '0xt9', block: 9 },
+    undefined,
+    BUNDLE,
+    H2,
+    created().owner,
+  );
+  assert.equal(updated.workerHash, H2);
+  assert.equal(updated.creation, undefined);
+  assert.equal(updated.updates?.length, 1);
+  assert.doesNotThrow(() => checkRecord(updated));
 });

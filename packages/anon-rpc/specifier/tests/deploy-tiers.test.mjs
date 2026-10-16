@@ -5,8 +5,8 @@
 // run; a keystore broadcast stays the operator's.
 
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
@@ -26,6 +26,7 @@ const DEPLOYER = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266'; // anvil account 
 const dir = mkdtempSync(join(tmpdir(), 'zknet-deploy-tiers-'));
 const store = join(dir, 'store');
 const records = join(dir, 'records');
+const posted = join(dir, 'posted');
 const preflight = join(dir, 'preflight');
 const config = join(dir, 'deploy.local.json');
 const rehearsal = join(dir, 'rehearse.json');
@@ -84,6 +85,8 @@ const deployTest = (bundle, extra) =>
     config,
     '--records',
     records,
+    '--posted',
+    posted,
     '--preflight',
     preflight,
     '--fork-port',
@@ -290,4 +293,202 @@ test('the cycle works on a record whose updates history was removed or emptied',
     assert.equal(verify.status, 0, verify.out);
     assert.match(verify.out, new RegExp(`specifier ${address}`));
   }
+});
+
+const OTHER = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'; // anvil account 1
+
+/** Deploy a specifier on the stand-in chain through the local loop, from `from`. */
+async function liveSpecifier(/** @type {string} */ from) {
+  const url = await serve(FIXTURE_BUNDLE);
+  const out = await cli('deploy.mjs', [
+    '--bundle',
+    FIXTURE_BUNDLE,
+    '--rpc-url',
+    RPC,
+    '--resolver',
+    url,
+    '--from',
+    from,
+    '--deployments',
+    mkdtempSync(join(dir, 'loop-')),
+  ]);
+  assert.equal(out.status, 0, out.out);
+  return out.out.trim().split('\n').pop() ?? '';
+}
+
+/** @param {string} method @param {unknown[]} params */
+const rpcCall = (method, params) =>
+  fetch(RPC, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+  }).then((r) => r.json());
+
+test('--address targets an existing specifier with no record, and plans an update', async () => {
+  rmSync(records, { recursive: true, force: true });
+  rmSync(posted, { recursive: true, force: true });
+  const address = await liveSpecifier(DEPLOYER);
+  const url2 = await serve(second);
+  await prove(second);
+
+  const refused = await deployTest(second, ['--address', address, '--resolver', url2]);
+  assert.equal(refused.status, 1);
+  assert.match(refused.out, new RegExp(`target ${address} \\(--address; no record for it yet\\)`));
+  assert.match(
+    refused.out,
+    new RegExp(`--update --address ${address}`),
+    'the re-run line keeps the address',
+  );
+
+  const dry = await deployTest(second, ['--address', address, '--update', '--resolver', url2]);
+  assert.equal(dry.status, 0, dry.out);
+  assert.match(
+    dry.out,
+    new RegExp(
+      `would setWorker\\(${(await digestFile(second)).keccak256}, 1 resolver\\(s\\)\\) on ${address}`,
+    ),
+  );
+  assert.match(dry.out, new RegExp(`deploy:test --broadcast --update --address ${address}`));
+  assert.equal(
+    readRecord(join(records, 'test.json')),
+    undefined,
+    'a dry run writes no working record',
+  );
+
+  const rehearsed = await deployTest(second, [
+    '--rehearse',
+    '--address',
+    address,
+    '--update',
+    '--resolver',
+    url2,
+  ]);
+  assert.equal(rehearsed.status, 0, rehearsed.out);
+  assert.match(rehearsed.out, /rehearsal: updated/);
+  const would = readRecord(rehearsal);
+  assert.equal(would?.address, address);
+  assert.equal(would?.creation, undefined, 'started from --address: no creation');
+  assert.equal(would?.updates?.length, 1);
+});
+
+test('--address refuses another owner, other code, and no code', async () => {
+  await prove(FIXTURE_BUNDLE);
+  const theirs = await liveSpecifier(OTHER);
+  const owner = await deployTest(FIXTURE_BUNDLE, [
+    '--address',
+    theirs,
+    '--resolver',
+    await serve(FIXTURE_BUNDLE),
+  ]);
+  assert.equal(owner.status, 1);
+  assert.match(owner.out, new RegExp(`owned by ${OTHER}, not the configured deployer`));
+
+  const odd = '0x000000000000000000000000000000000000c0de';
+  await rpcCall('anvil_setCode', [odd, '0x600160005260206000f3']);
+  const code = await deployTest(FIXTURE_BUNDLE, ['--address', odd]);
+  assert.equal(code.status, 1);
+  assert.match(code.out, /is not the EF reference WorkerSpecifier/);
+
+  const none = await deployTest(FIXTURE_BUNDLE, [
+    '--address',
+    '0x000000000000000000000000000000000000dead',
+  ]);
+  assert.equal(none.status, 1);
+  assert.match(none.out, /holds no code on this chain/);
+});
+
+test('the working record wins over the posted one, and the plan names both', async () => {
+  rmSync(records, { recursive: true, force: true });
+  rmSync(posted, { recursive: true, force: true });
+  await prove(FIXTURE_BUNDLE);
+  const url = await serve(FIXTURE_BUNDLE);
+  const mine = await liveSpecifier(DEPLOYER);
+  const public_ = await liveSpecifier(DEPLOYER);
+  const recordOf = (/** @type {string} */ address) =>
+    createdRecord({
+      tier: 'test',
+      chainId: 11155111,
+      address,
+      codehash: REFERENCE_CODEHASH,
+      owner: DEPLOYER,
+      creation: { tx: '0x00', block: 0 },
+      workerHash: '0x00',
+      bundle: { file: 'f', bytes: 1, gitCommit: head(), dirty: true },
+    });
+
+  writeRecord(join(posted, 'test.json'), recordOf(public_));
+  const onlyPosted = await deployTest(FIXTURE_BUNDLE, ['--resolver', url]);
+  assert.equal(onlyPosted.status, 0, onlyPosted.out);
+  assert.match(onlyPosted.out, new RegExp(`record .*posted/test.json: ${public_}`));
+  assert.match(onlyPosted.out, /already deployed and up to date/);
+
+  writeRecord(join(records, 'test.json'), recordOf(mine));
+  const both = await deployTest(FIXTURE_BUNDLE, ['--resolver', url]);
+  assert.equal(both.status, 0, both.out);
+  assert.match(both.out, new RegExp(`record .*records/test.json: ${mine}`));
+  assert.match(
+    both.out,
+    new RegExp(`note: the posted deployments/test.json names ${public_}; the working record wins`),
+  );
+  assert.match(both.out, new RegExp(`already deployed and up to date: ${mine}`));
+
+  const chosen = await deployTest(FIXTURE_BUNDLE, ['--resolver', url, '--address', public_]);
+  assert.equal(chosen.status, 0, chosen.out);
+  assert.match(
+    chosen.out,
+    new RegExp(`already deployed and up to date: ${public_}`),
+    '--address overrides both',
+  );
+  assert.doesNotMatch(chosen.out, /note: the posted/);
+});
+
+test('private iteration leaves git status clean: the working record and every run artifact are ignored', async () => {
+  const status = () =>
+    spawnSync('git', ['status', '--porcelain', '--', '.'], { cwd: PROJECT_DIR, encoding: 'utf8' })
+      .stdout;
+  const before = status();
+  const inState = join(PROJECT_DIR, '.state', `test-records-${process.pid}`);
+  await prove(FIXTURE_BUNDLE);
+  const url = await serve(FIXTURE_BUNDLE);
+  const address = await liveSpecifier(DEPLOYER);
+  // A working record where the real one lives (.state), driven through a dry run and a rehearsal.
+  writeRecord(join(inState, 'test.json'), {
+    ...createdRecord({
+      tier: 'test',
+      chainId: 11155111,
+      address,
+      codehash: REFERENCE_CODEHASH,
+      owner: DEPLOYER,
+      creation: { tx: '0x00', block: 0 },
+      workerHash: '0x00',
+      bundle: { file: 'f', bytes: 1, gitCommit: head(), dirty: true },
+    }),
+  });
+  const args = [
+    '--tier',
+    'test',
+    '--bundle',
+    second,
+    '--config',
+    config,
+    '--records',
+    inState,
+    '--posted',
+    posted,
+    '--preflight',
+    preflight,
+    '--fork-port',
+    String(FORK_PORT),
+    '--rehearse-record',
+    join(inState, 'rehearse.json'),
+  ];
+  await prove(second);
+  const url2 = await serve(second);
+  for (const extra of [['--update'], ['--rehearse', '--update']]) {
+    const r = await cli('deploy.mjs', [...args, '--resolver', url2, ...extra]);
+    assert.equal(r.status, 0, r.out);
+  }
+  assert.equal(status(), before, 'nothing under the specifier changed in git');
+  rmSync(inState, { recursive: true, force: true });
+  void url;
 });
