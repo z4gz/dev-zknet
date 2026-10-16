@@ -3,8 +3,8 @@
 The on-chain half of anon-rpc [SPEC §4](https://github.com/ethereum/anon-rpc/blob/main/SPEC.md)
 for the ZKNet anon-rpc worker: a `WorkerSpecifier` contract that pins the worker bundle by
 `keccak256` and lists resolvers that serve it, plus the tooling to hash the bundle, check that it
-builds reproducibly, serve it content-addressed, and deploy and verify the specifier on a local
-anvil chain.
+builds reproducibly, serve it content-addressed, and deploy and verify the specifier — on a local
+anvil chain, on Sepolia, and on mainnet, each behind a test gate.
 
 Foundry (`forge`, `cast`, `anvil`) and Node built-ins only — no npm dependencies.
 
@@ -36,13 +36,21 @@ to it automatically).
 | `resolver-put`                     | copies the bundle into the store at its content address and prints its URL                        |
 | `resolver-start` / `resolver-stop` | the resolver in the background                                                                    |
 | `anvil-start` / `anvil-stop`       | a local chain on `127.0.0.1:8545` in the background                                               |
+| `preflight`                        | the deploy gate (see [Deploy tiers](#deploy-tiers)); `deploy` and `publish` depend on it          |
+| `gate-deps`                        | lint, typecheck and test of the worker and transport, then the worker build, in that order        |
+| `publish`                          | puts the bundle where the tier's resolvers serve it from                                          |
 | `deploy`                           | deploys the specifier (idempotent), prints its address                                            |
 | `verify`                           | reads the specifier back and boot-resolves it as a harness does                                   |
+| `verify-source`                    | verifies the deployed source on Sourcify (`test` and `prod`)                                      |
 | `e2e`                              | the whole loop on its own ports, then stops everything                                            |
 | `demo-up` / `demo-down`            | the backend for trying the worker in the anon-rpc demo site (see `@zknet/anon-rpc-e2e`'s README)  |
 
-Arguments after `--` reach the script, e.g.
+Arguments after the target reach the script, e.g.
 `nx run @zknet/anon-rpc-specifier:hash --bundle=fixtures/keccak/19/4f04…`.
+
+`preflight`, `publish`, `deploy` and `verify` take a tier as their Nx configuration —
+`deploy:dev` (the default), `deploy:test`, `deploy:prod`. The configuration is a tier, never a
+verb: `test` the target runs tests, `deploy:test` deploys to the test tier.
 
 ## Local loop
 
@@ -90,6 +98,126 @@ Every chain-facing value is an input, so another chain is configuration:
 | `--deployments`                | `.state/deployments`                                                                                                                      |
 
 `--dry-run` stops before sending anything. The scripts never read, print or pass a raw private key.
+
+## Deploy tiers
+
+| Tier   | Chain                       | Signer                                 | Sends                   | Record                                    |
+| ------ | --------------------------- | -------------------------------------- | ----------------------- | ----------------------------------------- |
+| `dev`  | local anvil (31337)         | anvil's unlocked account               | yes                     | `.state/deployments/31337.json` (ignored) |
+| `test` | Ethereum Sepolia (11155111) | Foundry keystore, interactive password | only with `--broadcast` | `deployments/test.json` (committed)       |
+| `prod` | Ethereum mainnet (1)        | Foundry keystore, interactive password | only with `--broadcast` | `deployments/prod.json` (committed)       |
+
+A tier fixes its chain in code (`scripts/lib/tiers.mjs`); every script refuses an RPC endpoint
+that reports another chain id and prints `tier=<name> chainId=<id>` first. Nx falls back to the
+default configuration for a name it does not know, so a mistyped tier (`deploy:mainnet`) runs
+`dev`, which can only reach a local chain.
+
+### The gate
+
+`deploy` and `publish` depend on `preflight`, so nothing reaches a chain or a resolver unless the
+gate passes. Its cached half is the same for every tier: this project's `compile`, `test`,
+`fmt-check` and `lint`, then `gate-deps` (lint, typecheck and tests of the worker and transport,
+then the worker build, run in sequence with `CI=true` so vitest never waits in watch mode). On top,
+`scripts/preflight.mjs --tier` adds:
+
+| Tier   | Adds                                                                                                                                                     |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dev`  | nothing                                                                                                                                                  |
+| `test` | the bundle must be what a clean export of `HEAD` builds (`reproducible --clean-export`), so the pinned hash maps to a commit; records `HEAD` and `dirty` |
+| `prod` | `test`, plus an empty `git status --porcelain`, `HEAD` on `main` and on a remote branch, and `deployments/test.json` already pinning the same bundle     |
+
+It writes what it proved to `.state/preflight/<tier>.json`; a public-tier `deploy` refuses a
+bundle, or a `HEAD`, that the proof does not name.
+
+### Local config (never committed)
+
+A public tier takes its chain-facing values from `deploy.local.json` in this directory, ignored by
+git; `deploy.local.example.json` is the template:
+
+```jsonc
+{
+  "test": {
+    "rpcUrl": "https://ethereum-sepolia-rpc.publicnode.com",
+    "account": "<keystore name>", // Foundry's default keystore directory
+    "deployer": "0x…", // the address that keystore signs as; cast refuses a mismatch
+    "resolvers": ["https://<pages project>.pages.dev/keccak/{path}"],
+    "pages": { "project": "<pages project>" },
+  },
+}
+```
+
+`{path}` becomes `<hash[0:2]>/<hash[2:]>`. Resolvers are a list, in order; public tiers accept
+`https:` entries only. The resolver URLs become public on-chain at deploy; they are kept out of
+the code, not secret.
+
+### A `test` cycle
+
+From the repository root:
+
+```sh
+nx run @zknet/anon-rpc-specifier:publish:test           # gate, then stage .state/publish/test; prints the wrangler line
+wrangler pages deploy packages/anon-rpc/specifier/.state/publish/test --project-name <pages project> --branch main
+nx run @zknet/anon-rpc-specifier:deploy:test --rehearse  # gate, then the whole deploy on a local fork of Sepolia
+nx run @zknet/anon-rpc-specifier:deploy:test             # gate, then a dry run: chain check, resolver check, plan
+nx run @zknet/anon-rpc-specifier:deploy:test --broadcast # one keystore password prompt; writes deployments/test.json
+nx run @zknet/anon-rpc-specifier:verify:test             # boot-resolve from Sepolia through the pinned resolvers
+nx run @zknet/anon-rpc-specifier:verify-source:test      # Sourcify, no API key
+```
+
+A redeploy of a new bundle is the same lines with `--update` on the `deploy` steps: `setWorker` on
+the recorded address, which only its owner can call.
+
+- **`publish`** stages a cumulative static site: every bundle ever staged for the tier stays at
+  `keccak/<hash[0:2]>/<hash[2:]>`, because a Pages deploy replaces the whole site and older pins may
+  still be fetched. `_headers` serves them as `application/octet-stream` with `no-transform`, so
+  Cloudflare does not compress them (a resolver must answer without `Content-Encoding`), plus
+  immutable caching and CORS. It never runs `wrangler`.
+- **`--rehearse`** starts anvil on a fork of the tier's chain, impersonates the configured
+  deployer (no key), deploys or updates, reads back, boot-resolves through the fork, and reports
+  gas, cost and whether the deployer's real balance covers it. It writes the would-be record to
+  `.state/rehearse/<tier>.json` and sends nothing to the real chain. `--resolver <url>` and
+  `--deployer <addr>` override the config for a rehearsal (a local resolver before Pages is live; a
+  stand-in signer before the keystore exists).
+- **`--broadcast`** signs with `--account <name> --from <deployer>`: Foundry asks for the password on
+  the terminal, once per transaction; the scripts never see it. A broadcast always checks its
+  resolvers and pins exactly the configured ones.
+
+### The committed record
+
+`deployments/<tier>.json` is written only after a broadcast passes read-back, and committing it is
+a manual step:
+
+```jsonc
+{
+  "tier": "test",
+  "chainId": 11155111,
+  "address": "0x…",
+  "contract": "WorkerSpecifier",
+  "codehash": "0xc4c54384…7b5f",
+  "owner": "0x…",
+  "creation": { "tx": "0x…", "block": 0 },
+  "workerHash": "0x…",
+  "bundle": { "file": "zknet-anon-rpc-worker.js", "bytes": 0, "gitCommit": "…", "dirty": false },
+  "updates": [{ "tx": "0x…", "block": 0, "workerHash": "0x…", "gitCommit": "…" }],
+}
+```
+
+It never holds a URL; writing one fails. `updates` is informational and meant to be curated by
+hand before committing — prune test noise, keep what matters. No tooling reads it: everything
+works from the top-level fields, with `updates` missing or empty.
+
+### What a complete redeploy updates
+
+1. **The resolver-hosted bundle** — `publish:<tier>` and the `wrangler pages deploy` upload; later,
+   any other resolver in the list (e.g. a `keccak` branch on `raw.githubusercontent.com`).
+2. **The specifier on chain** — `deploy:<tier> --broadcast` (`--update` for a new bundle).
+3. **The committed record** — `deployments/<tier>.json`, reviewed, curated, committed.
+4. **Source verification** — `verify-source:<tier>`, once per new contract.
+5. **ZKNet's entry in upstream anon-rpc `adopters.json5`** — `specifier` and `chainId` of the
+   live address, by pull request against that file, when the address changes (a `setWorker` keeps
+   it).
+6. **The exit's network routes** — only if the worker should reach a network the exit does not yet
+   route (`http_proxy_config.toml`).
 
 ## Reproducibility
 
