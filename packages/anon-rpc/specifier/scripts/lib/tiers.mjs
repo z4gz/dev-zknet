@@ -74,9 +74,15 @@ const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
  * never printed by this module.
  * @param {Tier} tier
  * @param {string} [file]
+ * @param {{ resolvers?: boolean }} [need] resolvers: false when the caller supplies its own
+ *   (a dry run or rehearsal with --resolver), so the configured list may still be a placeholder
  * @returns {TierConfig}
  */
-export function loadTierConfig(tier, file = LOCAL_CONFIG) {
+export function loadTierConfig(
+  tier,
+  file = LOCAL_CONFIG,
+  { resolvers: needResolvers = true } = {},
+) {
   if (!existsSync(file))
     throw new CliError(
       `${file} not found: copy deploy.local.example.json to deploy.local.json and fill in the ${tier.name} section`,
@@ -102,10 +108,12 @@ export function loadTierConfig(tier, file = LOCAL_CONFIG) {
   const deployer = need('deployer');
   if (!ADDRESS.test(deployer))
     throw new CliError(`${file}: ${tier.name}.deployer is not an address`);
-  const resolvers = section.resolvers;
-  if (!Array.isArray(resolvers) || resolvers.length === 0)
+  const resolvers = needResolvers ? section.resolvers : [];
+  if (needResolvers && (!Array.isArray(resolvers) || resolvers.length === 0))
     throw new CliError(`${file}: ${tier.name}.resolvers must be a non-empty list`);
   for (const r of resolvers) {
+    if (typeof r === 'string' && r.includes('<'))
+      throw new CliError(`${file}: ${tier.name}.resolvers still holds a placeholder`);
     if (typeof r !== 'string' || !r.includes('{path}'))
       throw new CliError(`${file}: every ${tier.name}.resolvers entry must contain {path}`);
     if (!r.startsWith('https://'))

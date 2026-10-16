@@ -85,7 +85,9 @@ async function main(argv) {
 
   let rpcUrl = values['rpc-url'] || process.env.RPC_URL || DEFAULT_RPC_URL;
   if (tier?.public && !values['rpc-url'])
-    rpcUrl = loadTierConfig(tier, /** @type {string} */ (values.config)).rpcUrl;
+    rpcUrl = loadTierConfig(tier, /** @type {string} */ (values.config), {
+      resolvers: false,
+    }).rpcUrl;
   const id = await chainId(rpcUrl);
   if (tier) assertChain(tier, id);
 

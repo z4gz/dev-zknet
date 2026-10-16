@@ -409,7 +409,7 @@ async function publicTier(tier, values) {
   if (values.deployer && !values.rehearse)
     throw new CliError('--deployer is a rehearsal stand-in only');
 
-  const config = loadTierConfig(tier, values.config);
+  const config = loadTierConfig(tier, values.config, { resolvers: values.resolver.length === 0 });
   const deployer = values.deployer ?? config.deployer;
   const bundle = values.bundle;
   const digest = await digestFile(bundle);

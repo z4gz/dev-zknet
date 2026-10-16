@@ -94,6 +94,10 @@ test('local config: missing file, missing section, placeholders and bad entries 
     /https/,
   );
   assert.throws(() => loadTierConfig(t, configWith({ ...GOOD, resolvers: [] })), /non-empty/);
+  const placeholder = { ...GOOD, resolvers: ['https://<pages project>.pages.dev/keccak/{path}'] };
+  assert.throws(() => loadTierConfig(t, configWith(placeholder)), /placeholder/);
+  // A caller with its own resolvers (dry run, rehearsal, verify) does not need the list yet.
+  assert.deepEqual(loadTierConfig(t, configWith(placeholder), { resolvers: false }).resolvers, []);
 });
 
 test('the committed example config is valid JSON with test and prod sections, and is not ignored', () => {

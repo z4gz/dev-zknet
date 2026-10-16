@@ -50,7 +50,9 @@ async function main(argv) {
   const tier = tierOf(values.tier);
   if (!tier.public) throw new CliError('verify-source is for the public tiers (test, prod)');
   console.log(banner(tier));
-  const { rpcUrl } = loadTierConfig(tier, /** @type {string} */ (values.config));
+  const { rpcUrl } = loadTierConfig(tier, /** @type {string} */ (values.config), {
+    resolvers: false,
+  });
   assertChain(tier, await chainId(rpcUrl));
   const address =
     values.address ??
