@@ -103,6 +103,7 @@ function writeDeployment(dir, record) {
  * @property {number} [block]
  * @property {bigint} [gasUsed]
  * @property {bigint} [cost]   gasUsed x effectiveGasPrice, in wei
+ * @property {bigint} [gasPrice] effectiveGasPrice, in wei
  * @property {string} [owner]
  */
 
@@ -247,16 +248,16 @@ async function readBack(rpcUrl, address, workerHash, resolvers) {
 async function receiptFacts(rpcUrl, tx) {
   const r = /** @type {any} */ (await rpc(rpcUrl, 'eth_getTransactionReceipt', [tx]));
   const gasUsed = BigInt(r.gasUsed);
-  return {
-    tx,
-    block: Number(r.blockNumber),
-    gasUsed,
-    cost: gasUsed * BigInt(r.effectiveGasPrice ?? 0),
-  };
+  const gasPrice = BigInt(r.effectiveGasPrice ?? 0);
+  return { tx, block: Number(r.blockNumber), gasUsed, gasPrice, cost: gasUsed * gasPrice };
 }
 
 /** @param {bigint} wei */
-const eth = (wei) => `${(Number(wei) / 1e18).toFixed(6)} ETH`;
+export const eth = (wei) => {
+  const s = wei.toString().padStart(19, '0');
+  const frac = s.slice(-18).replace(/0+$/, '');
+  return `${s.slice(0, -18)}${frac ? `.${frac}` : ''} ETH`;
+};
 
 /** @param {string[]} argv */
 async function main(argv) {
@@ -590,7 +591,7 @@ async function rehearse(tier, upstream, port, common, record, bundleRef, bundle,
     if (outcome.action !== 'noop') {
       const cost = /** @type {bigint} */ (outcome.cost);
       console.log(
-        `rehearsal: ${outcome.action} ${outcome.address} — gasUsed ${outcome.gasUsed}, cost ${eth(cost)} at the fork's gas price`,
+        `rehearsal: ${outcome.action} ${outcome.address} — gasUsed ${outcome.gasUsed}, cost ${eth(cost)} at the fork's ${Number(outcome.gasPrice) / 1e9} gwei; at 10 gwei it would be ${eth(/** @type {bigint} */ (outcome.gasUsed) * 10_000_000_000n)}`,
       );
       console.log(
         realBalance >= cost
