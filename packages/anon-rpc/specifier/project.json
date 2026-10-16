@@ -61,6 +61,42 @@
         "cwd": "{projectRoot}"
       }
     },
+    "gate-deps": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "commands": [
+          "pnpm nx run-many -t lint,typecheck,test -p @zknet/anon-rpc-worker @zknet/anon-rpc-transport --outputStyle=static",
+          "pnpm nx run @zknet/anon-rpc-worker:build --outputStyle=static"
+        ],
+        "parallel": false,
+        "cwd": "{workspaceRoot}",
+        "env": {
+          "CI": "true"
+        }
+      }
+    },
+    "preflight": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "dependsOn": ["compile", "test", "fmt-check", "lint", "gate-deps"],
+      "defaultConfiguration": "dev",
+      "options": {
+        "command": "node scripts/preflight.mjs --tier dev",
+        "cwd": "{projectRoot}"
+      },
+      "configurations": {
+        "dev": {
+          "command": "node scripts/preflight.mjs --tier dev"
+        },
+        "test": {
+          "command": "node scripts/preflight.mjs --tier test"
+        },
+        "prod": {
+          "command": "node scripts/preflight.mjs --tier prod"
+        }
+      }
+    },
     "reproducible": {
       "executor": "nx:run-commands",
       "cache": false,
@@ -118,20 +154,84 @@
         "cwd": "{projectRoot}"
       }
     },
+    "publish": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "dependsOn": ["preflight"],
+      "defaultConfiguration": "dev",
+      "options": {
+        "command": "node scripts/publish.mjs --tier dev",
+        "cwd": "{projectRoot}"
+      },
+      "configurations": {
+        "dev": {
+          "command": "node scripts/publish.mjs --tier dev"
+        },
+        "test": {
+          "command": "node scripts/publish.mjs --tier test"
+        },
+        "prod": {
+          "command": "node scripts/publish.mjs --tier prod"
+        }
+      }
+    },
     "deploy": {
       "executor": "nx:run-commands",
       "cache": false,
+      "dependsOn": ["preflight"],
+      "defaultConfiguration": "dev",
       "options": {
-        "command": "node scripts/deploy.mjs",
-        "cwd": "{projectRoot}"
+        "command": "node scripts/deploy.mjs --tier dev",
+        "cwd": "{projectRoot}",
+        "tty": true
+      },
+      "configurations": {
+        "dev": {
+          "command": "node scripts/deploy.mjs --tier dev"
+        },
+        "test": {
+          "command": "node scripts/deploy.mjs --tier test"
+        },
+        "prod": {
+          "command": "node scripts/deploy.mjs --tier prod"
+        }
       }
     },
     "verify": {
       "executor": "nx:run-commands",
       "cache": false,
+      "defaultConfiguration": "dev",
       "options": {
-        "command": "node scripts/verify.mjs",
+        "command": "node scripts/verify.mjs --tier dev",
         "cwd": "{projectRoot}"
+      },
+      "configurations": {
+        "dev": {
+          "command": "node scripts/verify.mjs --tier dev"
+        },
+        "test": {
+          "command": "node scripts/verify.mjs --tier test"
+        },
+        "prod": {
+          "command": "node scripts/verify.mjs --tier prod"
+        }
+      }
+    },
+    "verify-source": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "defaultConfiguration": "test",
+      "options": {
+        "command": "node scripts/verify-source.mjs --tier test",
+        "cwd": "{projectRoot}"
+      },
+      "configurations": {
+        "test": {
+          "command": "node scripts/verify-source.mjs --tier test"
+        },
+        "prod": {
+          "command": "node scripts/verify-source.mjs --tier prod"
+        }
       }
     },
     "e2e": {

@@ -91,26 +91,26 @@ export function firstDifference(a, b) {
   return a.length === b.length ? -1 : n;
 }
 
-/** @param {string[]} argv */
-async function main(argv) {
-  const { values } = parseArgs({
-    args: argv,
-    options: {
-      build: { type: 'string', default: process.env.WORKER_BUILD_CMD || DEFAULT_BUILD },
-      bundle: { type: 'string', default: process.env.WORKER_BUNDLE || DEFAULT_BUNDLE },
-      runs: { type: 'string', default: '2' },
-      'clean-export': { type: 'boolean', default: false },
-      ref: { type: 'string', default: 'HEAD' },
-      install: { type: 'string', default: DEFAULT_INSTALL },
-      keep: { type: 'boolean', default: false },
-    },
-  });
-  const runs = Number(values.runs);
-  if (!Number.isInteger(runs) || runs < 2) throw new CliError('--runs must be an integer >= 2');
-  const build = /** @type {string} */ (values.build);
-  const bundleRel = relative(WORKSPACE_DIR, /** @type {string} */ (values.bundle));
-  if (bundleRel.startsWith('..'))
-    throw new CliError(`bundle ${values.bundle} is outside the workspace`);
+/**
+ * @typedef {object} ReproduceOptions
+ * @property {string} build
+ * @property {string} bundle
+ * @property {number} runs
+ * @property {boolean} cleanExport
+ * @property {string} ref
+ * @property {string} install
+ * @property {boolean} keep
+ */
+
+/**
+ * Build the bundle `runs` times and compare the outputs.
+ * @param {ReproduceOptions} o
+ * @returns {Promise<{ results: import("./lib/digest.mjs").FileDigest[], odd?: import("./lib/digest.mjs").FileDigest }>}
+ */
+export async function reproduce(o) {
+  if (!Number.isInteger(o.runs) || o.runs < 2) throw new CliError('--runs must be an integer >= 2');
+  const bundleRel = relative(WORKSPACE_DIR, o.bundle);
+  if (bundleRel.startsWith('..')) throw new CliError(`bundle ${o.bundle} is outside the workspace`);
 
   const outDir = join(STATE_DIR, 'reproducible');
   rmSync(outDir, { recursive: true, force: true });
@@ -121,22 +121,22 @@ async function main(argv) {
   const results = [];
 
   try {
-    for (let i = 1; i <= runs; i++) {
+    for (let i = 1; i <= o.runs; i++) {
       let root = WORKSPACE_DIR;
-      if (values['clean-export']) {
+      if (o.cleanExport) {
         // Different path lengths per run, so an embedded absolute path shows up as a byte difference.
         root = join(mkdtempSync(join(tmpdir(), `zknet-repro-${'x'.repeat(i)}-`)), 'src');
         scratch.push(join(root, '..'));
         mkdirSync(root);
-        exportTree(/** @type {string} */ (values.ref), root);
-        console.log(`\n== run ${i}: clean export of ${values.ref} at ${root}`);
-        sh(/** @type {string} */ (values.install), root);
+        exportTree(o.ref, root);
+        console.log(`\n== run ${i}: clean export of ${o.ref} at ${root}`);
+        sh(o.install, root);
       } else {
         console.log(`\n== run ${i}: in place`);
       }
       const bundle = join(root, bundleRel);
       rmSync(bundle, { force: true });
-      sh(build, root);
+      sh(o.build, root);
       if (!existsSync(bundle))
         throw new CliError(`run ${i}: the build did not produce ${bundleRel}`);
       const kept = join(outDir, `run-${i}.js`);
@@ -144,14 +144,51 @@ async function main(argv) {
       results.push(await digestFile(kept));
     }
   } finally {
-    if (!values.keep) for (const dir of scratch) rmSync(dir, { recursive: true, force: true });
+    if (!o.keep) for (const dir of scratch) rmSync(dir, { recursive: true, force: true });
   }
+  const first = results[0];
+  return {
+    results,
+    odd: results.find((r) => r.keccak256 !== first?.keccak256),
+  };
+}
+
+/** @param {string[]} argv */
+async function main(argv) {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      build: {
+        type: 'string',
+        default: process.env.WORKER_BUILD_CMD || DEFAULT_BUILD,
+      },
+      bundle: {
+        type: 'string',
+        default: process.env.WORKER_BUNDLE || DEFAULT_BUNDLE,
+      },
+      runs: { type: 'string', default: '2' },
+      'clean-export': { type: 'boolean', default: false },
+      ref: { type: 'string', default: 'HEAD' },
+      install: { type: 'string', default: DEFAULT_INSTALL },
+      keep: { type: 'boolean', default: false },
+    },
+  });
+  const runs = Number(values.runs);
+  const bundleRel = relative(WORKSPACE_DIR, /** @type {string} */ (values.bundle));
+  const { results, odd } = await reproduce({
+    build: /** @type {string} */ (values.build),
+    bundle: /** @type {string} */ (values.bundle),
+    runs,
+    cleanExport: /** @type {boolean} */ (values['clean-export']),
+    ref: /** @type {string} */ (values.ref),
+    install: /** @type {string} */ (values.install),
+    keep: /** @type {boolean} */ (values.keep),
+  });
 
   console.log('');
   for (const r of results)
     console.log(`${r.keccak256}  ${r.bytes} bytes  ${relative(WORKSPACE_DIR, r.file)}`);
   const first = results[0];
-  const odd = results.find((r) => r.keccak256 !== first?.keccak256);
   if (first === undefined || odd === undefined) {
     console.log(
       `✓ reproducible: ${runs} builds of ${bundleRel} are byte-identical (keccak256 ${first?.keccak256})`,
@@ -162,7 +199,9 @@ async function main(argv) {
   console.log(
     `✗ NOT reproducible: ${relative(WORKSPACE_DIR, odd.file)} differs from run 1 at byte ${at}`,
   );
-  console.log(`  outputs kept in ${relative(WORKSPACE_DIR, outDir)} for diffing`);
+  console.log(
+    `  outputs kept in ${relative(WORKSPACE_DIR, join(STATE_DIR, 'reproducible'))} for diffing`,
+  );
   return 1;
 }
 

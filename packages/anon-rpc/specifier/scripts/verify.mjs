@@ -5,40 +5,36 @@
 // require the pinned hash to be that file's.
 //
 // Usage:
-//   node scripts/verify.mjs [--address <addr>] [--rpc-url <url>] [--bundle <path>] [--deployments <dir>]
+//   node scripts/verify.mjs [--tier dev|test|prod] [--address <addr>] [--rpc-url <url>]
+//                           [--bundle <path>] [--deployments <dir>] [--config <file>] [--records <dir>]
 //
-// Without --address, the address comes from <deployments>/<chainId>.json.
+// Without --address, the address comes from the record: <deployments>/<chainId>.json
+// locally, deployments/<tier>.json for a public tier (whose RPC URL comes from
+// deploy.local.json). A tier refuses an endpoint on another chain.
 // Exits 1 unless at least one resolver admits the bundle and none serves
 // other bytes.
 
 import { parseArgs } from 'node:util';
 import { digestFile } from './lib/digest.mjs';
-import { DEFAULT_RPC_URL, DEPLOYMENTS_DIR } from './lib/paths.mjs';
+import { DEFAULT_RPC_URL, DEPLOYMENTS_DIR, LOCAL_CONFIG, RECORDS_DIR } from './lib/paths.mjs';
 import { CliError, isMain, runMain } from './lib/proc.mjs';
+import { readRecord, recordPath } from './lib/record.mjs';
 import { chainId } from './lib/rpc.mjs';
 import { checkResolver, readSpecifier, REFERENCE_CODEHASH } from './lib/specifier.mjs';
+import { assertChain, banner, loadTierConfig, tierOf } from './lib/tiers.mjs';
 import { readDeployment } from './deploy.mjs';
 
-/** @param {string[]} argv */
-async function main(argv) {
-  const { values } = parseArgs({
-    args: argv,
-    options: {
-      address: { type: 'string' },
-      'rpc-url': { type: 'string', default: process.env.RPC_URL || DEFAULT_RPC_URL },
-      bundle: { type: 'string' },
-      deployments: { type: 'string', default: DEPLOYMENTS_DIR },
-    },
-  });
-  const rpcUrl = /** @type {string} */ (values['rpc-url']);
-  const id = await chainId(rpcUrl);
-  const address =
-    values.address ?? readDeployment(/** @type {string} */ (values.deployments), id)?.address;
-  if (!address) throw new CliError(`no --address and no recorded deployment for chain ${id}`);
-
+/**
+ * Print what the specifier pins and whether its resolvers admit it.
+ * @param {string} rpcUrl
+ * @param {string} address
+ * @param {string} [bundle] also require the pinned hash to be this file's
+ * @returns {Promise<number>} the number of failures
+ */
+export async function verifySpecifier(rpcUrl, address, bundle) {
   const spec = await readSpecifier(rpcUrl, address);
-  if (!spec) throw new CliError(`no code at ${address} on chain ${id}`);
-  console.log(`specifier ${address} on chain ${id}`);
+  if (!spec) throw new CliError(`no code at ${address}`);
+  console.log(`specifier ${address}`);
   console.log(
     `  codehash        ${spec.codehash}${spec.codehash === REFERENCE_CODEHASH ? '  (EF reference WorkerSpecifier)' : '  (NOT the reference)'}`,
   );
@@ -47,10 +43,11 @@ async function main(argv) {
   spec.resolvers.forEach((r, i) => console.log(`  workerResolvers()[${i}] ${r}`));
 
   let failures = 0;
-  if (values.bundle) {
-    const digest = await digestFile(values.bundle);
+  if (spec.codehash !== REFERENCE_CODEHASH) failures++;
+  if (bundle) {
+    const digest = await digestFile(bundle);
     const same = digest.keccak256 === spec.workerHash;
-    console.log(`${same ? '✓' : '✗'} bundle ${values.bundle} hashes to ${digest.keccak256}`);
+    console.log(`${same ? '✓' : '✗'} bundle ${bundle} hashes to ${digest.keccak256}`);
     if (!same) failures++;
   }
 
@@ -66,6 +63,40 @@ async function main(argv) {
     console.log('✗ no resolver served bytes matching workerHash()');
     failures++;
   }
+  return failures;
+}
+
+/** @param {string[]} argv */
+async function main(argv) {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      tier: { type: 'string' },
+      address: { type: 'string' },
+      'rpc-url': { type: 'string' },
+      bundle: { type: 'string' },
+      deployments: { type: 'string', default: DEPLOYMENTS_DIR },
+      config: { type: 'string', default: LOCAL_CONFIG },
+      records: { type: 'string', default: RECORDS_DIR },
+    },
+  });
+  const tier = values.tier === undefined ? undefined : tierOf(values.tier);
+  if (tier) console.log(banner(tier));
+
+  let rpcUrl = values['rpc-url'] || process.env.RPC_URL || DEFAULT_RPC_URL;
+  if (tier?.public && !values['rpc-url'])
+    rpcUrl = loadTierConfig(tier, /** @type {string} */ (values.config)).rpcUrl;
+  const id = await chainId(rpcUrl);
+  if (tier) assertChain(tier, id);
+
+  const address =
+    values.address ??
+    (tier?.public
+      ? readRecord(recordPath(/** @type {string} */ (values.records), tier.name))?.address
+      : readDeployment(/** @type {string} */ (values.deployments), id)?.address);
+  if (!address) throw new CliError(`no --address and no recorded deployment for chain ${id}`);
+  console.log(`chain ${id}`);
+  const failures = await verifySpecifier(rpcUrl, address, values.bundle);
   return failures === 0 ? 0 : 1;
 }
 

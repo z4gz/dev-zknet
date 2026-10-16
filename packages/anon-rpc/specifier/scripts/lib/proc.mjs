@@ -71,6 +71,35 @@ export function run(cmd, args, { cwd = PROJECT_DIR, env = process.env, echo = fa
   });
 }
 
+/**
+ * Run a command that may ask the operator for a keystore password: stdin and
+ * stderr stay on the terminal, so Foundry's prompt reaches them and their
+ * answer reaches Foundry without passing through this process. Only stdout
+ * (the --json result) is captured.
+ * @param {string} cmd
+ * @param {string[]} args
+ * @returns {Promise<string>}
+ */
+export function runSigning(cmd, args, { cwd = PROJECT_DIR, env = process.env } = {}) {
+  return new Promise((resolve, reject) => {
+    const p = spawn(cmd, args, {
+      cwd,
+      env,
+      stdio: ['inherit', 'pipe', 'inherit'],
+    });
+    let out = '';
+    p.stdout.on('data', (b) => {
+      out += b;
+    });
+    p.on('error', reject);
+    p.on('exit', (code) =>
+      code === 0
+        ? resolve(out.trim())
+        : reject(new CliError(`${cmd.split('/').pop()} ${args[0]} exited ${code}`)),
+    );
+  });
+}
+
 /** @param {number} ms */
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
