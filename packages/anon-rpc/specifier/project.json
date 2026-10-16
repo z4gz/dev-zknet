@@ -61,21 +61,28 @@
         "cwd": "{projectRoot}"
       }
     },
-    "gate-deps": {
-      "executor": "nx:run-commands",
-      "cache": false,
-      "options": {
-        "command": "pnpm nx run-many -t lint,typecheck,test,build -p @zknet/anon-rpc-worker @zknet/anon-rpc-transport --outputStyle=static",
-        "cwd": "{workspaceRoot}",
-        "env": {
-          "CI": "true"
-        }
-      }
-    },
     "preflight": {
       "executor": "nx:run-commands",
       "cache": false,
-      "dependsOn": ["compile", "test", "fmt-check", "lint", "gate-deps"],
+      "dependsOn": [
+        "compile",
+        "test",
+        "fmt-check",
+        "lint",
+        {
+          "projects": ["@zknet/anon-rpc-worker", "@zknet/anon-rpc-transport"],
+          "target": "lint"
+        },
+        {
+          "projects": ["@zknet/anon-rpc-worker", "@zknet/anon-rpc-transport"],
+          "target": "typecheck"
+        },
+        {
+          "projects": ["@zknet/anon-rpc-worker", "@zknet/anon-rpc-transport"],
+          "target": "test"
+        },
+        "@zknet/anon-rpc-worker:build"
+      ],
       "defaultConfiguration": "dev",
       "options": {
         "command": "node scripts/preflight.mjs --tier dev",
