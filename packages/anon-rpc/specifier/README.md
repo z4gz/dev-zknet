@@ -37,7 +37,7 @@ to it automatically).
 | `resolver-start` / `resolver-stop` | the resolver in the background                                                                    |
 | `anvil-start` / `anvil-stop`       | a local chain on `127.0.0.1:8545` in the background                                               |
 | `preflight`                        | the deploy gate (see [Deploy tiers](#deploy-tiers)); `deploy` and `publish` depend on it          |
-| `gate-deps`                        | lint, typecheck and test of the worker and transport, then the worker build, in that order        |
+| `gate-deps`                        | lint, typecheck, test and build of the worker and transport, with `CI=true`                       |
 | `publish`                          | puts the bundle where the tier's resolvers serve it from                                          |
 | `deploy`                           | deploys the specifier (idempotent), prints its address                                            |
 | `verify`                           | reads the specifier back and boot-resolves it as a harness does                                   |
@@ -116,8 +116,9 @@ default configuration for a name it does not know, so a mistyped tier (`deploy:m
 
 `deploy` and `publish` depend on `preflight`, so nothing reaches a chain or a resolver unless the
 gate passes. Its cached half is the same for every tier: this project's `compile`, `test`,
-`fmt-check` and `lint`, then `gate-deps` (lint, typecheck and tests of the worker and transport,
-then the worker build, run in sequence with `CI=true` so vitest never waits in watch mode). On top,
+`fmt-check` and `lint`, then `gate-deps` (lint, typecheck, tests and build of the worker and
+transport in one nested `nx run-many`, with `CI=true` so vitest never waits in watch mode under a
+terminal). On top,
 `scripts/preflight.mjs --tier` adds:
 
 | Tier   | Adds                                                                                                                                                     |

@@ -65,11 +65,7 @@
       "executor": "nx:run-commands",
       "cache": false,
       "options": {
-        "commands": [
-          "pnpm nx run-many -t lint,typecheck,test -p @zknet/anon-rpc-worker @zknet/anon-rpc-transport --outputStyle=static",
-          "pnpm nx run @zknet/anon-rpc-worker:build --outputStyle=static"
-        ],
-        "parallel": false,
+        "command": "pnpm nx run-many -t lint,typecheck,test,build -p @zknet/anon-rpc-worker @zknet/anon-rpc-transport --outputStyle=static",
         "cwd": "{workspaceRoot}",
         "env": {
           "CI": "true"
