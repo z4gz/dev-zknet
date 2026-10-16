@@ -100,11 +100,11 @@ Every chain-facing value is an input, so another chain is configuration:
 
 ## Deploy tiers
 
-| Tier   | Chain                       | Signer                                 | Sends                   | Record                                    |
-| ------ | --------------------------- | -------------------------------------- | ----------------------- | ----------------------------------------- |
-| `dev`  | local anvil (31337)         | anvil's unlocked account               | yes                     | `.state/deployments/31337.json` (ignored) |
-| `test` | Ethereum Sepolia (11155111) | Foundry keystore, interactive password | only with `--broadcast` | `deployments/test.json` (committed)       |
-| `prod` | Ethereum mainnet (1)        | Foundry keystore, interactive password | only with `--broadcast` | `deployments/prod.json` (committed)       |
+| Tier   | Chain                       | Signer                                 | Sends                   | Record                                     |
+| ------ | --------------------------- | -------------------------------------- | ----------------------- | ------------------------------------------ |
+| `dev`  | local anvil (31337)         | anvil's unlocked account               | yes                     | `.state/deployments/31337.json` (ignored)  |
+| `test` | Ethereum Sepolia (11155111) | Foundry keystore, interactive password | only with `--broadcast` | `.state/records/test.json`; posted by hand |
+| `prod` | Ethereum mainnet (1)        | Foundry keystore, interactive password | only with `--broadcast` | `.state/records/prod.json`; posted by hand |
 
 A tier fixes its chain in code (`scripts/lib/tiers.mjs`); every script refuses an RPC endpoint
 that reports another chain id and prints `tier=<name> chainId=<id>` first. Nx falls back to the
@@ -119,11 +119,11 @@ gate passes. Its cached half is the same for every tier: this project's `compile
 configs set `watch: false`, so the gate never waits on a watcher), and the worker build. On top,
 `scripts/preflight.mjs --tier` adds:
 
-| Tier   | Adds                                                                                                                                                     |
-| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `dev`  | nothing                                                                                                                                                  |
-| `test` | the bundle must be what a clean export of `HEAD` builds (`reproducible --clean-export`), so the pinned hash maps to a commit; records `HEAD` and `dirty` |
-| `prod` | `test`, plus an empty `git status --porcelain`, `HEAD` on `main` and on a remote branch, and `deployments/test.json` already pinning the same bundle     |
+| Tier   | Adds                                                                                                                                                            |
+| ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dev`  | nothing                                                                                                                                                         |
+| `test` | the bundle must be what a clean export of `HEAD` builds (`reproducible --clean-export`), so the pinned hash maps to a commit; records `HEAD` and `dirty`        |
+| `prod` | `test`, plus an empty `git status --porcelain`, `HEAD` on `main` and on a remote branch, and the posted `deployments/test.json` already pinning the same bundle |
 
 It writes what it proved to `.state/preflight/<tier>.json`; a public-tier `deploy` refuses a
 bundle, or a `HEAD`, that the proof does not name.
@@ -158,13 +158,14 @@ nx run @zknet/anon-rpc-specifier:publish:test           # gate, then stage .stat
 wrangler pages deploy packages/anon-rpc/specifier/.state/publish/test --project-name <pages project> --branch main
 nx run @zknet/anon-rpc-specifier:deploy:test --rehearse  # gate, then the whole deploy on a local fork of Sepolia
 nx run @zknet/anon-rpc-specifier:deploy:test             # gate, then a dry run: chain check, resolver check, plan
-nx run @zknet/anon-rpc-specifier:deploy:test --broadcast # one keystore password prompt; writes deployments/test.json
+nx run @zknet/anon-rpc-specifier:deploy:test --broadcast # one keystore password prompt; writes .state/records/test.json
 nx run @zknet/anon-rpc-specifier:verify:test             # boot-resolve from Sepolia through the pinned resolvers
 nx run @zknet/anon-rpc-specifier:verify-source:test      # Sourcify, no API key
 ```
 
 A redeploy of a new bundle is the same lines with `--update` on the `deploy` steps: `setWorker` on
-the recorded address, which only its owner can call.
+the recorded address, which only its owner can call. `--address <addr>` points any of them at
+another existing specifier instead (see [Records](#records)).
 
 - **`publish`** stages a cumulative static site: every bundle ever staged for the tier stays at
   `keccak/<hash[0:2]>/<hash[2:]>`, because a Pages deploy replaces the whole site and older pins may
@@ -181,10 +182,41 @@ the recorded address, which only its owner can call.
   the terminal, once per transaction; the scripts never see it. A broadcast always checks its
   resolvers and pins exactly the configured ones.
 
-### The committed record
+### Records
 
-`deployments/<tier>.json` is written only after a broadcast passes read-back, and committing it is
-a manual step:
+A public tier keeps two kinds of record, with the same schema:
+
+| Record  | Where                        | Written by                            | In git       |
+| ------- | ---------------------------- | ------------------------------------- | ------------ |
+| working | `.state/records/<tier>.json` | `deploy --broadcast`, after read-back | no (ignored) |
+| posted  | `deployments/<tier>.json`    | you, by copying the working record    | yes, by hand |
+
+Iterating privately on one contract therefore touches nothing in git. **Posting** a deployment
+for public consumption is a deliberate step:
+
+```sh
+cp packages/anon-rpc/specifier/.state/records/test.json packages/anon-rpc/specifier/deployments/test.json
+$EDITOR packages/anon-rpc/specifier/deployments/test.json   # curate updates[], if you like
+git add packages/anon-rpc/specifier/deployments/test.json && git commit
+```
+
+Which contract a run targets, in order:
+
+1. `--address <addr>`, when given;
+2. else the working record, when there is one;
+3. else the posted record;
+4. else none: a new contract.
+
+Every run prints what it chose — `record <file>: <address> pins <hash>`, `target <addr> (--address;
+…)` or `record none yet` — before anything is sent, and notes a posted record that names a
+different contract than the working one. Writes always go to the working record; nothing writes
+`deployments/`.
+
+`--address` adopts an existing specifier without a record: it must hold the EF reference code and
+be owned by the configured deployer, and changing what it pins still needs `--update`. The working
+record that results has no `creation` (the chain has it; nothing here needs it). This is also how
+to switch contracts: `--address` once with `--broadcast`, and the working record names it from then
+on.
 
 ```jsonc
 {
@@ -194,23 +226,24 @@ a manual step:
   "contract": "WorkerSpecifier",
   "codehash": "0xc4c54384…7b5f",
   "owner": "0x…",
-  "creation": { "tx": "0x…", "block": 0 },
+  "creation": { "tx": "0x…", "block": 0 }, // absent when started from --address
   "workerHash": "0x…",
   "bundle": { "file": "zknet-anon-rpc-worker.js", "bytes": 0, "gitCommit": "…", "dirty": false },
   "updates": [{ "tx": "0x…", "block": 0, "workerHash": "0x…", "gitCommit": "…" }],
 }
 ```
 
-It never holds a URL; writing one fails. `updates` is informational and meant to be curated by
-hand before committing — prune test noise, keep what matters. No tooling reads it: everything
-works from the top-level fields, with `updates` missing or empty.
+A record never holds a URL; writing one fails. `updates` is informational and meant to be curated
+by hand before posting: prune test noise, keep what matters. No tooling reads it. Everything works
+from the top-level fields, with `updates` missing or empty.
 
 ### What a complete redeploy updates
 
 1. **The resolver-hosted bundle** — `publish:<tier>` and the `wrangler pages deploy` upload; later,
    any other resolver in the list (e.g. a `keccak` branch on `raw.githubusercontent.com`).
 2. **The specifier on chain** — `deploy:<tier> --broadcast` (`--update` for a new bundle).
-3. **The committed record** — `deployments/<tier>.json`, reviewed, curated, committed.
+3. **The posted record** — `deployments/<tier>.json`, copied from the working record, curated,
+   committed — only when the deployment is for public consumption.
 4. **Source verification** — `verify-source:<tier>`, once per new contract.
 5. **ZKNet's entry in upstream anon-rpc `adopters.json5`** — `specifier` and `chainId` of the
    live address, by pull request against that file, when the address changes (a `setWorker` keeps
