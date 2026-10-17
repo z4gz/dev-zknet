@@ -1,7 +1,7 @@
 import type { TransportErrorCode, TransportErrorShape, TransportFailure } from './types.js';
 
 /**
- * A transport failure. `code` is the SPEC §12 value a host branches on;
+ * A transport failure. `code` is the Anon-RPC SPEC v0.3.2 §12 value a host branches on;
  * `name` is the finer, equally stable reason; `message` is diagnostic only.
  */
 export class TransportError extends Error implements TransportErrorShape {
@@ -30,6 +30,8 @@ export const ZKNET_ERROR_REASONS: Readonly<Record<string, { code: TransportError
   'upstream-unreachable': { code: 'network-error', name: 'UpstreamUnreachable' },
   'too-large': { code: 'too-large', name: 'TooLarge' },
   'bad-reply': { code: 'protocol-error', name: 'BadReply' },
+  'exit-busy': { code: 'queue-full', name: 'ExitBusy' },
+  'provider-selection-off': { code: 'permission-denied', name: 'ExitRefused' },
 };
 
 /** The TransportError for a peer reply carrying `ZKNet-Error: <reason>`. */

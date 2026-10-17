@@ -13,16 +13,16 @@ named after the peer it talks to, not the protocol:
 ```ts
 interface Transport {
   readonly peer: 'walletshield' | 'kpclientd';
-  request(req: { network: string; body: Uint8Array; contentType: string }, opts?: { signal?: AbortSignal }): Promise<{ status: number; headers: HeaderList; body: Uint8Array }>;
+  request(req: ({ network: string } | { url: string }) & { body: Uint8Array; contentType: string }, opts?: { signal?: AbortSignal }): Promise<{ status: number; headers: HeaderList; body: Uint8Array }>;
   probe(opts?: { signal?: AbortSignal; depth?: 'peer' | 'exit' }): Promise<ProbeResult>; // never rejects
   close(): Promise<void>;
 }
 ```
 
 `request` is cut at the exit's contract: a network key (`ethereum`,
-`ethereum/sepolia`) and a body go in, and the upstream's reply comes out.
-Failures are `TransportError`s with a SPEC §12 `code` and a stable `name`. The
-worker README lists them.
+`ethereum/sepolia`) or the user's provider URL, and a body, go in, and the
+upstream's reply comes out. Failures are `TransportError`s with an Anon-RPC
+SPEC v0.3.2 §12 `code` and a stable `name`. The worker README lists them.
 
 ## Where a peer may live — `src/lib/targets.ts`
 
@@ -37,14 +37,17 @@ rules are plain arrays: `TARGET_CIDRS`, `TARGET_HOSTNAMES` (`localhost`,
   The transport branches on this header and never on the status alone. The
   browser can read the header only if WalletShield lists it in
   `Access-Control-Expose-Headers`.
+- **Requests.** A network key goes to `POST /<network>`. A provider URL goes
+  to `POST /_/url` with the URL in the `ZKNet-URL` header, never in the
+  request line; WalletShield moves it into the exit request.
 - **Upstream replies.** Every other reply is the upstream's. The transport
   relays its status and `UPSTREAM_HEADERS` (`content-type`, `retry-after`).
-  The browser hides `retry-after` unless WalletShield exposes it too.
+  The browser hides `retry-after` unless WalletShield exposes it too. A
+  provider's 3xx is a reply like any other: the exit never follows it and
+  WalletShield never relays `Location`.
 - **Health.** `GET /_/health` is answered locally with
   `{"version": "..."}`. This is the probe's `peer` tier. The `exit` tier is
   `POST /_/probe/0`, which costs one mixnet round trip.
-- **Older WalletShield.** A WalletShield that predates this contract still
-  works: its replies pass through as they are, and `probe` reports `legacy`.
 
 ## Testing
 

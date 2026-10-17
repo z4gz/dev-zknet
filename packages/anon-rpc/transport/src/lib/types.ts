@@ -3,15 +3,16 @@
 // exit's reply back.
 //
 // Named by peer, not by protocol. Every implementation ends at the same exit
-// service (`http_proxy`), which takes a serialized HTTP request, uses its
-// path as a key into the operator's `[Networks]` map, and relays the upstream
-// status, an allowlisted set of headers and the body. The seam carries
-// exactly that — a network key and a body in, an upstream reply out — and
+// service (`http_proxy`), which takes a serialized HTTP request and either
+// uses its path as a key into the operator's `[Networks]` map or fetches the
+// provider URL the user chose, and relays the upstream status, an
+// allowlisted set of headers and the body. The seam carries exactly that — a
+// network key or a provider URL and a body in, an upstream reply out — and
 // nothing a particular peer protocol would add.
 
 /**
- * anon-rpc SPEC §12 `KpsErrorCode`, reused as the worker's call-failure
- * vocabulary. This is the field a host may branch on (SPEC §7, §12).
+ * Anon-RPC SPEC v0.3.2 §12 `KpsErrorCode`, reused as the worker's call-failure
+ * vocabulary. This is the field a host may branch on (Anon-RPC SPEC v0.3.2 §7, §12).
  */
 export type TransportErrorCode =
   | 'cancelled'
@@ -45,8 +46,14 @@ export type TransportFailure =
   | 'MixedContentBlocked'
   /** The peer reported that no reply came back over the mixnet in its own deadline. */
   | 'MixTimeout'
-  /** The exit refused the request (e.g. a network key it does not serve); nothing went upstream. */
+  /**
+   * The exit refused the request; nothing went upstream. E.g. a network key
+   * it does not serve, a provider URL its destination policy refuses, or
+   * provider selection turned off by its operator.
+   */
   | 'ExitRefused'
+  /** The exit was already serving its maximum number of requests. */
+  | 'ExitBusy'
   /** The exit could not complete the upstream request. */
   | 'UpstreamUnreachable'
   /** The peer could not decode the exit's reply. */
@@ -64,17 +71,22 @@ export type TransportFailure =
   /** The peer URL is not a local peer (or not a URL this transport speaks). Raised at construction. */
   | 'TargetRefused';
 
-/** One request for the exit. */
-export interface ExitRequest {
+/** Where the exit sends a request: exactly one of the two. */
+export type ExitTarget =
   /** Key into the exit's `[Networks]` map, without a leading slash: `ethereum`, `ethereum/sepolia`. */
-  network: string;
-  /** Request body bytes; for `/ethereum-rpc` a JSON-RPC payload (single or batch). */
+  | { network: string; url?: never }
+  /** The provider the user chose: an absolute `https:` URL the exit fetches under its destination policy. */
+  | { url: string; network?: never };
+
+/** One request for the exit. */
+export type ExitRequest = ExitTarget & {
+  /** Request body bytes: a JSON-RPC payload (single or batch). */
   body: Uint8Array;
   /** The one request header the exit forwards upstream. */
   contentType: string;
-}
+};
 
-/** An `[name, value]` header list, order and duplicates preserved (SPEC §9.1 `HeaderList`). */
+/** An `[name, value]` header list, order and duplicates preserved (Anon-RPC SPEC v0.3.2 §9.1 `HeaderList`). */
 export type HeaderList = [name: string, value: string][];
 
 /**
@@ -109,8 +121,6 @@ export interface ProbeResult {
   ms: number;
   /** The peer's self-reported version, when it reports one. */
   peerVersion?: string;
-  /** True when the peer answered but predates the failure-marking contract (no local health answer). */
-  legacy?: boolean;
   /** Why it stopped short of `exit`, when it did. */
   error?: TransportErrorShape;
 }

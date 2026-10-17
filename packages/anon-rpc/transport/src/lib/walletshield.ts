@@ -11,9 +11,10 @@
 //   body, relayed as-is;
 // - `GET /_/health` is answered locally, without the mixnet.
 //
-// A WalletShield that predates the contract answers neither marker nor
-// health. It still works: its replies pass through as they are, and `probe`
-// reports it as `legacy`.
+// A request goes to `POST /<network>` for a `[Networks]` key, or to
+// `POST /_/url` with the provider URL in the `ZKNet-URL` header. The header
+// keeps the URL, which often embeds an API key, out of request lines and
+// logs; WalletShield moves it into the exit request.
 
 import { TransportError, zknetError } from './errors.js';
 import { classifyTarget, TARGET_SCHEMES, type TargetClass } from './targets.js';
@@ -36,6 +37,10 @@ export const UPSTREAM_HEADERS: readonly string[] = ['content-type', 'retry-after
 
 /** The header that marks a reply WalletShield or the exit originated. */
 export const ZKNET_ERROR_HEADER = 'zknet-error';
+
+/** WalletShield's provider-selection endpoint, and the header that names the provider. */
+export const USER_URL_PATH = '/_/url';
+export const URL_HEADER = 'zknet-url';
 
 /** Local health path (answered by WalletShield itself) and exit probe path (one mix round trip). */
 export const HEALTH_PATH = '/_/health';
@@ -99,10 +104,13 @@ export class WalletShieldTransport implements Transport {
   }
 
   async request(req: ExitRequest, opts: RequestOptions = {}): Promise<ExitResponse> {
-    const network = req.network.replace(/^\/+/, '');
-    return this.#exchange(`/${network}`, {
+    const [path, headers]: [string, Record<string, string>] =
+      req.url !== undefined
+        ? [USER_URL_PATH, { 'content-type': req.contentType, [URL_HEADER]: req.url }]
+        : [`/${req.network.replace(/^\/+/, '')}`, { 'content-type': req.contentType }];
+    return this.#exchange(path, {
       method: 'POST',
-      headers: { 'content-type': req.contentType },
+      headers,
       // A copy over exactly the request bytes: `fetch` reads a view's whole buffer otherwise.
       body: req.body.slice(),
     }, opts.signal, async (res) => {
@@ -121,37 +129,35 @@ export class WalletShieldTransport implements Transport {
 
     // Peer tier: WalletShield answers its health path locally.
     let peerVersion: string | undefined;
-    let legacy: boolean;
     try {
       peerVersion = await this.#exchange(HEALTH_PATH, { method: 'GET' }, opts.signal, async (res) => {
         const json = (await res.json().catch(() => undefined)) as { version?: unknown } | undefined;
         return res.status === 200 && typeof json?.version === 'string' ? json.version : undefined;
       });
-      legacy = peerVersion === undefined;
     } catch (e) {
       const error = shape(e);
       if (error.name === 'PeerUnreachable' && (await this.#answersOpaquely(opts.signal))) {
         // Something answers, but its replies are unreadable from here.
         return done({ reach: 'peer', error: { code: 'permission-denied', name: 'CorsRejected', message: 'WalletShield answered, but its reply is not readable from this origin (CORS)' } });
       }
-      // A marked failure on the health path: a WalletShield that forwarded it instead of answering.
-      if (MARKED.has(error.name)) return done({ reach: 'peer', legacy: true, error });
+      // A marked failure on the health path: the peer answered, but not as WalletShield does.
+      if (MARKED.has(error.name)) return done({ reach: 'peer', error });
       return done({ reach: 'none', error });
     }
 
-    if ((opts.depth ?? 'peer') === 'peer') return done({ reach: 'peer', peerVersion, legacy });
+    if ((opts.depth ?? 'peer') === 'peer') return done({ reach: 'peer', peerVersion });
 
     // Exit tier: one probe through the mixnet; the exit answers its probe path itself.
     try {
       await this.#exchange(EXIT_PROBE_PATH, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '' }, opts.signal, async (res) => {
         await res.arrayBuffer();
       });
-      return done({ reach: 'exit', peerVersion, legacy });
+      return done({ reach: 'exit', peerVersion });
     } catch (e) {
       const error = shape(e);
       // The exit answered unless the failure happened before it could.
-      if (MARKED.has(error.name) && error.name !== 'MixTimeout' && error.name !== 'TooLarge') return done({ reach: 'exit', peerVersion, legacy });
-      return done({ reach: 'peer', peerVersion, legacy, error });
+      if (MARKED.has(error.name) && error.name !== 'MixTimeout' && error.name !== 'TooLarge') return done({ reach: 'exit', peerVersion });
+      return done({ reach: 'peer', peerVersion, error });
     }
   }
 
@@ -187,9 +193,15 @@ export class WalletShieldTransport implements Transport {
         ...init,
         credentials: 'omit',
         cache: 'no-store',
-        redirect: 'error',
+        // A provider's 3xx is relayed as the reply. Under Fetch's `error` mode
+        // any 3xx is a network error, and under `manual` an opaque status 0,
+        // so neither can carry it. WalletShield never relays `Location`, so
+        // `follow` returns the 3xx as it is; a reply that was redirected
+        // anyway did not come from WalletShield and is refused below.
+        redirect: 'follow',
         signal: combined,
       });
+      if (res.redirected) throw new TransportError('protocol-error', 'UnexpectedReply', 'the peer redirected the request; WalletShield never does');
       const reason = res.headers.get(ZKNET_ERROR_HEADER);
       if (reason !== null) throw zknetError(reason.trim(), await errorMessage(res));
       return await read(res);
@@ -236,7 +248,7 @@ export class WalletShieldTransport implements Transport {
 }
 
 /** Failures marked by a `ZKNet-Error` reply, i.e. the peer answered. */
-const MARKED: ReadonlySet<string> = new Set(['MixTimeout', 'ExitRefused', 'UpstreamUnreachable', 'BadReply', 'TooLarge', 'UnexpectedReply']);
+const MARKED: ReadonlySet<string> = new Set(['MixTimeout', 'ExitRefused', 'ExitBusy', 'UpstreamUnreachable', 'BadReply', 'TooLarge', 'UnexpectedReply']);
 
 function refused(message: string): TransportError {
   return new TransportError('unsupported', 'TargetRefused', message);

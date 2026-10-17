@@ -8,8 +8,7 @@
 //   node scripts/demo.mjs down   stops anvil and the resolver
 //
 //   WORKER_BUNDLE      bundle to serve (default: the worker project's dist)
-//   DEMO_WALLETSHIELD  WalletShield URL for the printed worker config (default http://127.0.0.1:7070)
-//   DEMO_NETWORK       exit [Networks] key for the printed worker config (default ethereum)
+//   DEMO_WALLETSHIELD  WalletShield URL for the printed worker config and RPC URL (default http://127.0.0.1:7070)
 
 import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -86,10 +85,7 @@ async function up() {
 
   const record = JSON.parse(readFileSync(join(DEPLOYMENTS, `${CHAIN_ID}.json`), 'utf8'));
   const digest = await digestFile(bundle);
-  const config = {
-    walletshield: process.env.DEMO_WALLETSHIELD || 'http://127.0.0.1:7070',
-    network: process.env.DEMO_NETWORK || 'ethereum',
-  };
+  const config = { walletshield: process.env.DEMO_WALLETSHIELD || 'http://127.0.0.1:7070' };
   const moved = record.address.toLowerCase() !== EXPECTED_ADDRESS.toLowerCase();
   console.log(`
 ZKNet anon-rpc demo backend is up.
@@ -97,8 +93,9 @@ ZKNet anon-rpc demo backend is up.
   Specifier address  ${record.address}${moved ? `\n                     ⚠ not ${EXPECTED_ADDRESS}: account #9 sent another transaction first on this anvil;\n                       run demo-down then demo-up for a fresh chain, or use "Custom" with this address` : '   (the "ZKNet (local anvil)" preset)'}
   Chain id           ${CHAIN_ID} (anvil)
   Bootstrap RPC      ${RPC_URL}
-  Worker RPC         http://zknet.invalid/ethereum-rpc
-                     (any http(s) URL whose path is /ethereum-rpc; the host part is never contacted)
+  Worker RPC         any public https provider URL, e.g. https://ethereum-rpc.publicnode.com
+                     (the exit fetches it), or ${config.walletshield}/ethereum (or /ethereum/sepolia)
+                     for the exit operator's provider
   Worker config      ${JSON.stringify(config)}
   Bundle keccak256   ${digest.keccak256}  (${digest.bytes} bytes)
   Resolver           ${resolver}

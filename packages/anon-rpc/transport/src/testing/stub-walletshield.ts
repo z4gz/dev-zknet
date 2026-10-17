@@ -1,11 +1,13 @@
 // A stub WalletShield for tests: a real local HTTP listener that speaks the
 // reply contract (see ../lib/walletshield.ts), with no mixnet behind it.
 //
-// Each POST is answered by `upstream(network, body)`; tests swap it per case.
+// Each POST is answered by `upstream(target, body)`, where `target` is what
+// the exit would fetch: the `[Networks]` key of `POST /<network>`, or the
+// provider URL of `POST /_/url`. Tests swap it per case.
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { UPSTREAM_HEADERS } from '../lib/walletshield.js';
+import { UPSTREAM_HEADERS, URL_HEADER, USER_URL_PATH } from '../lib/walletshield.js';
 
 export interface StubReply {
   status: number;
@@ -24,10 +26,12 @@ export interface StubWalletShield {
   url: string;
   /** Every request received, in order. */
   requests: StubRequest[];
-  /** Answers POSTs other than the exit probe. Default: a JSON-RPC result for `eth_blockNumber`. */
-  upstream: (network: string, body: Uint8Array) => StubReply | Promise<StubReply> | 'hang';
-  /** `health` false makes `/_/health` behave like a WalletShield that predates it (forwarded, answered 404). */
-  health: boolean;
+  /**
+   * Answers POSTs other than the exit probe. `target` is the network key, or
+   * the provider URL for `POST /_/url`. Default: a JSON-RPC result for
+   * `eth_blockNumber`.
+   */
+  upstream: (target: string, body: Uint8Array) => StubReply | Promise<StubReply> | 'hang';
   close(): Promise<void>;
 }
 
@@ -44,7 +48,6 @@ export async function startStubWalletShield(version = 'stub-0.0.0'): Promise<Stu
   const stub: StubWalletShield = {
     url: '',
     requests: [],
-    health: true,
     upstream: () => ({ status: 200, headers: { 'content-type': 'application/json' }, body: '{"jsonrpc":"2.0","id":1,"result":"0x10"}' }),
     close: async () => {},
   };
@@ -70,12 +73,17 @@ export async function startStubWalletShield(version = 'stub-0.0.0'): Promise<Stu
     // As WalletShield does: the failure marker plus every relayed upstream header, so a browser can read them.
     res.setHeader('access-control-expose-headers', ['ZKNet-Error', ...UPSTREAM_HEADERS].join(', '));
     let reply: StubReply | 'hang';
+    const providerURL = req.headers[URL_HEADER];
     if (req.method === 'GET' && path === '/_/health') {
-      reply = stub.health
-        ? { status: 200, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ version }) }
-        : { status: 404, body: 'custom 404\n' };
+      reply = { status: 200, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ version }) };
     } else if (path.startsWith('/_/probe')) {
       reply = { status: 200, body: '' };
+    } else if (path === USER_URL_PATH) {
+      // As WalletShield does: the provider URL comes from the header, which is required.
+      reply =
+        typeof providerURL === 'string' && providerURL !== ''
+          ? await stub.upstream(providerURL, new Uint8Array(Buffer.concat(chunks)))
+          : marked('exit-refused', 502, `POST ${USER_URL_PATH} needs a ZKNet-URL header`);
     } else {
       reply = await stub.upstream(path.slice(1), new Uint8Array(Buffer.concat(chunks)));
     }

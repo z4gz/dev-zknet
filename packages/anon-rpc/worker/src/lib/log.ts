@@ -1,4 +1,4 @@
-// Logging through `anonRpcWorker.log` (SPEC §13).
+// Logging through `anonRpcWorker.log` (Anon-RPC SPEC v0.3.2 §13).
 //
 // Every entry is `("zknet-worker", event, fields?)`: `event` is a stable
 // name (`boot.start`, `ready`, `call.failed`, ...) and `fields` a flat object

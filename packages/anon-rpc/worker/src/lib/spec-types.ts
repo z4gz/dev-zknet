@@ -1,4 +1,4 @@
-// Worker-facing anon-rpc types (SPEC §7–§13), copied verbatim from
+// Worker-facing anon-rpc types (Anon-RPC SPEC v0.3.2 §7–§13), copied verbatim from
 // anon-rpc.git impl/passthrough-worker/src/spec-types.ts @ 31f37d5 (SPEC 0.3.2).
 
 // Worker-facing type surface from SPEC.md (§7–§13): the `anonRpcWorker`

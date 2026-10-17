@@ -1,8 +1,8 @@
 // Bundles the worker to one standalone IIFE: dist/zknet-anon-rpc-worker.js.
-// The bytes of that file are the SPEC §4 artifact — keccak256 of them is what
-// a specifier contract's workerHash() pins — so the build must be
-// byte-stable: no timestamps, no absolute paths, the same output from any
-// working directory. esbuild is pinned exactly at the workspace root for the
+// The bytes of that file are the Anon-RPC SPEC v0.3.2 §4 artifact —
+// keccak256 of them is what a specifier contract's workerHash() pins — so the
+// build must be byte-stable: no timestamps, no absolute paths, the same output
+// from any working directory. esbuild is pinned exactly at the workspace root for the
 // same reason: a different esbuild may emit different bytes.
 
 import { build } from 'esbuild';

@@ -62,6 +62,21 @@ describe('request', () => {
     expect(seen.body).toEqual(RPC);
   });
 
+  it('posts a provider URL to /_/url in the ZKNet-URL header, not in the path', async () => {
+    let target = '';
+    stub.upstream = (t) => {
+      target = t;
+      return { status: 200, headers: { 'content-type': 'application/json' }, body: '{"result":"0x1"}' };
+    };
+    const res = await new WalletShieldTransport({ url: stub.url }).request({ url: 'https://rpc.example/v3/key', body: RPC, contentType: 'application/json' });
+    expect(res.status).toBe(200);
+    expect(target).toBe('https://rpc.example/v3/key');
+    const seen = stub.requests.at(-1)!;
+    expect(`${seen.method} ${seen.path}`).toBe('POST /_/url');
+    expect(seen.headers['zknet-url']).toBe('https://rpc.example/v3/key');
+    expect(seen.body).toEqual(RPC);
+  });
+
   it('sends exactly the view it is given, not its whole buffer', async () => {
     const t = new WalletShieldTransport({ url: stub.url });
     const padded = new Uint8Array(RPC.length + 8);
@@ -81,6 +96,17 @@ describe('request', () => {
     expect(dec.decode(res.body)).toBe('slow down %d %s');
   });
 
+  it('relays a provider redirect as the reply, unfollowed', async () => {
+    stub.upstream = () => ({ status: 308, body: '' });
+    expect((await new WalletShieldTransport({ url: stub.url }).request(req())).status).toBe(308);
+  });
+
+  it('refuses a reply the peer redirected, which WalletShield never does', async () => {
+    stub.upstream = (target) => (target === 'elsewhere' ? { status: 200, body: '{}' } : { status: 307, headers: { location: `${stub.url}/elsewhere` }, body: '' });
+    const e = await rejection(new WalletShieldTransport({ url: stub.url }).request(req()));
+    expect([e.code, e.name]).toEqual(['protocol-error', 'UnexpectedReply']);
+  });
+
   it('treats an unmarked 502 as the upstream reply', async () => {
     stub.upstream = () => ({ status: 502, body: 'bad gateway upstream' });
     const res = await new WalletShieldTransport({ url: stub.url }).request(req());
@@ -93,6 +119,8 @@ describe('request', () => {
     ['upstream-unreachable', 502, 'network-error', 'UpstreamUnreachable'],
     ['too-large', 413, 'too-large', 'TooLarge'],
     ['bad-reply', 502, 'protocol-error', 'BadReply'],
+    ['exit-busy', 503, 'queue-full', 'ExitBusy'],
+    ['provider-selection-off', 502, 'permission-denied', 'ExitRefused'],
     ['something-new', 500, 'protocol-error', 'UnexpectedReply'],
   ])('ZKNet-Error %s → %s', async (reason, status, code, name) => {
     stub.upstream = () => marked(reason, status, 'diagnostic text');
@@ -180,7 +208,7 @@ describe('request', () => {
 describe('probe', () => {
   it('reaches the peer through its local health answer, without the mixnet', async () => {
     const r = await new WalletShieldTransport({ url: stub.url }).probe();
-    expect(r).toMatchObject({ reach: 'peer', peerVersion: 'stub-0.0.0', legacy: false });
+    expect(r).toMatchObject({ reach: 'peer', peerVersion: 'stub-0.0.0' });
     expect(stub.requests.map((q) => q.path)).toEqual(['/_/health']);
   });
 
@@ -200,13 +228,6 @@ describe('probe', () => {
   it('counts an exit-originated failure as the exit answering', async () => {
     const t = new WalletShieldTransport({ url: stub.url, fetch: routedFetch({ '/_/probe/0': marked('bad-reply', 502) }) });
     expect((await t.probe({ depth: 'exit' })).reach).toBe('exit');
-  });
-
-  it('flags a WalletShield that predates local health as legacy', async () => {
-    stub.health = false;
-    const r = await new WalletShieldTransport({ url: stub.url }).probe();
-    expect(r).toMatchObject({ reach: 'peer', legacy: true });
-    expect(r.peerVersion).toBeUndefined();
   });
 
   it('reports nothing listening', async () => {

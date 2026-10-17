@@ -1,4 +1,4 @@
-// The bundle's bytes are its identity (SPEC §4): two builds must agree, and
+// The bundle's bytes are its identity (Anon-RPC SPEC v0.3.2 §4): two builds must agree, and
 // nothing machine-specific may leak into them.
 
 type Build = { bundle(): Promise<Uint8Array> };
