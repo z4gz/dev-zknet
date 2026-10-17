@@ -161,9 +161,9 @@ The fix is on the fork's `fix/demo-local-file`.
 For a human with a running ZKNet dev mixnet. Nothing here starts one.
 
 1. Start the mixnet and a WalletShield as usual (root README, _Run the local mixnet_ and _Run the
-   clients locally_), and note WalletShield's `-listen` address. The exit must be built from
-   this tree: `docker/Makefile` builds `http_proxy.alpine` and `walletshield.alpine` only when
-   they are missing from the net directory.
+   clients locally_), and note WalletShield's `-listen` address. `docker/Makefile` rebuilds
+   `http_proxy.alpine` and `walletshield.alpine` when their Go sources change; a running mix
+   picks the new exit up only after `mixnet:stop` and `mixnet:start`.
 2. Run:
 
    ```sh
@@ -175,8 +175,11 @@ For a human with a running ZKNet dev mixnet. Nothing here starts one.
 
 3. It checks `/_/health` first, then boots the real bundle (local anvil for the specifier only)
    and prints each result:
-   - **mix round-trip time**: min, p50, p90 and max over the exit probes, against the 10 s the
-     exit's 10 s upstream timeout leaves inside WalletShield's 20 s;
+   - **mix round-trip time**: min, p50, p90 and max over the exit probes;
+   - **the upstream-timeout tripwire**: an exit probe delayed 3 s, just under the exit's 3.5 s
+     upstream timeout (`http_proxy/limits.go`), must still come back. The katzenpost client drops
+     a reply later than its encoded round trip plus 4.5 s (3 layers), so this fails if the
+     timeout outgrows that window;
    - **per chain**, `eth_chainId` through the demo's public provider URL and through
      WalletShield's network URL: both must be `0x1` (mainnet) or `0xaa36a7` (Sepolia);
    - **private provider addresses**: the literals `https://10.0.0.1/` and
@@ -190,11 +193,10 @@ For a human with a running ZKNet dev mixnet. Nothing here starts one.
    and names the stub in the exit container's `/etc/hosts` (`stub.exit-testbed.test`; the worker
    refuses private literals, and resolvers commonly drop wildcard-DNS private answers). It
    checks: the stub answers; `rfc1918.exit-testbed.test`, which resolves to `10.0.0.1`, is
-   `ExitRefused` after DNS; a 15 s reply fails as `UpstreamUnreachable` in under 20 s (the
-   exit's timeout, not a mix timeout) — marked as an expected failure for now: the katzenpost
-   client discards a reply that comes later than the encoded round trip plus 4.5 s, so the
-   exit's 10 s timeout reply is lost and the call reports `MixTimeout`; a 2 MiB reply is `TooLarge`; a 307 to a private address
-   is relayed as 307 and never followed. It restores the packaged config and restarts the
+   `ExitRefused` after DNS; a reply after 3 s is relayed; a hung reply fails as
+   `UpstreamUnreachable` well inside WalletShield's 20 s (the exit's timeout, not a mix
+   timeout); a 2 MiB reply is `TooLarge`; a 307 to a private address is relayed as 307 and
+   never followed. It restores the packaged config and restarts the
    service node again afterwards. Use it only on a disposable dev mix.
 
 On failure, the error name says where it broke: `PeerUnreachable`, `MixTimeout`, `ExitRefused`,

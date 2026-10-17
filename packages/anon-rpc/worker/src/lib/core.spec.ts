@@ -179,7 +179,7 @@ describe('fetch calls', () => {
 
   it.each([
     ['/ethereum', 'a relative URL'],
-    ['/ethereum-rpc', 'a relative URL'],
+    ['/rpc', 'a relative URL'],
     ['http://rpc.example/', 'a plain-http provider'],
     ['https://u:p@rpc.example/', 'credentials'],
     ['https://rpc.example/#x', 'a fragment'],

@@ -13,14 +13,20 @@ const (
 	ExitConcurrency = 16
 
 	// UpstreamTimeout bounds one upstream exchange: dial, TLS, request and
-	// the whole reply body. It stays well below WalletShield's -timeout
-	// (20 s), so a hung upstream reports as ReasonUpstreamUnreachable rather
-	// than ReasonMixTimeout.
-	UpstreamTimeout = 10 * time.Second
-	// DialTimeout and TLSHandshakeTimeout bound the connection set-up within
-	// UpstreamTimeout.
-	DialTimeout         = 3 * time.Second
-	TLSHandshakeTimeout = 3 * time.Second
+	// the whole reply body. It is set by the client, not by WalletShield's
+	// -timeout: the katzenpost v0.0.107 client daemon keeps a SURB's reply
+	// state for the encoded round trip plus (2·layers + 3) × perHopSlopMs
+	// (500 ms, private to client/daemon.go), and silently drops a later
+	// reply. That window is about 4.5 s at 3 layers, and per-hop scheduler,
+	// network and unwrap overhead consumes part of it (measured: an
+	// exit-side delay of 4 s comes back, 5 s never does). 3.5 s leaves about
+	// 1 s of margin, so a hung upstream reports as ReasonUpstreamUnreachable
+	// instead of being lost as a mix timeout.
+	UpstreamTimeout = 3500 * time.Millisecond
+	// DialTimeout and TLSHandshakeTimeout bound the connection set-up; each
+	// stays well inside UpstreamTimeout, which caps the whole exchange.
+	DialTimeout         = 1500 * time.Millisecond
+	TLSHandshakeTimeout = 1500 * time.Millisecond
 
 	// MaxRequestBodyBytes bounds the body the exit forwards upstream. A
 	// JSON-RPC read is under 1 kB and a signed transaction far below this.

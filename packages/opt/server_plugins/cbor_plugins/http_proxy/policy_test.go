@@ -79,6 +79,9 @@ func TestClientsCarryTheLimits(t *testing.T) {
 			t.Errorf("%s client: timeout %s, TLS %s, header bytes %d", name, c.Timeout, tr.TLSHandshakeTimeout, tr.MaxResponseHeaderBytes)
 		}
 	}
+	if DialTimeout >= UpstreamTimeout || TLSHandshakeTimeout >= UpstreamTimeout {
+		t.Errorf("connection set-up (dial %s, TLS %s) must fit inside UpstreamTimeout %s", DialTimeout, TLSHandshakeTimeout, UpstreamTimeout)
+	}
 	if NewUserClient(Policy{}, nil).Transport.(*http.Transport).Proxy != nil {
 		t.Error("the user client must not take a proxy from the environment")
 	}

@@ -104,8 +104,26 @@ test('mix round-trip time', async () => {
   ms.sort((a, b) => a - b);
   const at = (q: number) => Math.round(ms[Math.min(ms.length - 1, Math.floor(q * ms.length))] ?? NaN);
   say(`mix RTT over ${ms.length}/${RTT_PROBES} exit probes (${failed} failed): min ${at(0)} · p50 ${at(0.5)} · p90 ${at(0.9)} · max ${at(1)} ms`);
-  say(`budget: WalletShield -timeout 20000 ms − exit upstream timeout 10000 ms = 10000 ms for the mix round trip`);
+  say(`budget: the client keeps a reply for the encoded round trip + 4.5 s (3 layers); the exit's upstream timeout is 3.5 s`);
   expect(ms.length).toBeGreaterThan(0);
+});
+
+// Tripwire for the exit's upstream timeout (http_proxy/limits.go): an
+// exit-side delay just under it must still come back. The katzenpost client
+// drops a reply later than the encoded round trip + 4.5 s (3 layers); if
+// UpstreamTimeout outgrows that window, or the window shrinks, this fails.
+const UPSTREAM_TIMEOUT_MS = 3_500;
+const JUST_UNDER_MS = 3_000;
+
+test('an exit-side delay just under the upstream timeout still comes back', async () => {
+  for (let i = 0; i < 3; i++) {
+    const t = performance.now();
+    const res = await fetch(`${WALLETSHIELD}/_/probe/${JUST_UNDER_MS / 1000}`, { method: 'POST', body: '', signal: AbortSignal.timeout(30_000) }).catch(() => undefined);
+    await res?.arrayBuffer();
+    const ms = Math.round(performance.now() - t);
+    say(`exit probe delayed ${JUST_UNDER_MS} ms (upstream timeout ${UPSTREAM_TIMEOUT_MS} ms): ${res?.headers.get('zknet-error') ?? res?.status} in ${ms} ms`);
+    expect(exitAnswered(res), `a reply delayed ${JUST_UNDER_MS} ms at the exit was lost`).toBe(true);
+  }
 });
 
 for (const { chain: name, provider, network, chainId } of CHAINS) {
@@ -171,19 +189,19 @@ test.describe('against an https stub the exit can reach', () => {
     expect({ code: r.error?.code, name: r.error?.name }).toEqual({ code: 'permission-denied', name: 'ExitRefused' });
   });
 
-  test('a slow provider fails as the upstream, inside the exit timeout, not as a mix timeout', async ({ page }) => {
-    // Expected to fail today. The katzenpost v0.0.107 client keeps a SURB's
-    // reply state for the encoded round trip plus (2·layers+3) × 500 ms, 4.5 s
-    // on a 3-layer mix (client/daemon.go), and discards a later reply. Measured
-    // on the dev mix: an exit-side delay up to 4 s comes back, 5 s or more
-    // never does, so the exit's 10 s upstream timeout reply is lost and the
-    // call reports mix-timeout after WalletShield's 20 s.
-    test.fail(true, 'the exit upstream timeout (10 s) exceeds the client SURB reply retention (about 4.5 s)');
+  test('a provider answering just under the upstream timeout is relayed', async ({ page }) => {
+    await bootWorker(page);
+    const r = await rpc(page, `${bed.origin}/delay/${JUST_UNDER_MS}`);
+    report(`stub /delay/${JUST_UNDER_MS}`, r);
+    expect([r.status, result(r)]).toEqual([200, '0xdelay']);
+  });
+
+  test('a hung provider fails as the upstream, not as a mix timeout', async ({ page }) => {
     await bootWorker(page);
     const r = await rpc(page, `${bed.origin}/slow`);
     report('stub /slow', r);
     expect({ code: r.error?.code, name: r.error?.name }).toEqual({ code: 'network-error', name: 'UpstreamUnreachable' });
-    expect(r.ms).toBeLessThan(20_000);
+    expect(r.ms).toBeLessThan(15_000); // WalletShield's mix timeout is 20 s
   });
 
   test('an oversized reply is too large', async ({ page }) => {

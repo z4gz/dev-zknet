@@ -41,9 +41,9 @@ export interface ExitTestbed {
 const docker = (...args: string[]) => execFileSync('docker', args, { encoding: 'utf8' }).trim();
 
 /**
- * Stub routes: `/slow` answers after `slowMs`, `/big` with `bigBytes` bytes,
- * `/redirect-private` with a 307 to a private address, anything else with a
- * JSON-RPC result.
+ * Stub routes: `/slow` answers after `slowMs`, `/delay/<ms>` after `<ms>`,
+ * `/big` with `bigBytes` bytes, `/redirect-private` with a 307 to a private
+ * address, anything else with a JSON-RPC result.
  */
 export async function startExitTestbed(
   bed = DEFAULT_BED,
@@ -61,7 +61,10 @@ export async function startExitTestbed(
   const server: Server = createServer({ key: tls.key, cert: tls.cert }, (req, res) => {
     seen.push(`${req.method} ${req.url}`);
     req.resume();
-    if (req.url === '/slow') {
+    const delay = /^\/delay\/(\d+)$/.exec(req.url ?? '');
+    if (delay) {
+      setTimeout(() => res.writeHead(200, { 'content-type': 'application/json' }).end('{"jsonrpc":"2.0","id":1,"result":"0xdelay"}'), Number(delay[1]));
+    } else if (req.url === '/slow') {
       setTimeout(() => res.writeHead(200, { 'content-type': 'application/json' }).end('{"jsonrpc":"2.0","id":1,"result":"0xslow"}'), opts.slowMs ?? 15_000);
     } else if (req.url === '/big') {
       res.writeHead(200, { 'content-type': 'application/json' }).end(Buffer.alloc(opts.bigBytes ?? 2 * 1024 * 1024, 0x20));
