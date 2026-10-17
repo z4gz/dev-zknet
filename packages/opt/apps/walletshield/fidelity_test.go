@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/json"
 	"errors"
@@ -25,7 +26,7 @@ func replyServer(send func() ([]byte, error)) (http.HandlerFunc, *int) {
 	sent := 0
 	s := &Server{
 		log: log.New(io.Discard),
-		send: func([]byte) ([]byte, error) {
+		send: func([]byte, string) ([]byte, error) {
 			sent++
 			return send()
 		},
@@ -132,22 +133,6 @@ func TestUpstreamWithoutContentTypeGetsNone(t *testing.T) {
 	}
 }
 
-// An exit that predates Response.Status relays only the body.
-func TestLegacyExitReplyIsOKJSON(t *testing.T) {
-	h, _ := replyServer(exitReply(t, 0, nil, rpcReply))
-	resp := serve(h, post(""))
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK || string(body) != rpcReply {
-		t.Errorf("got %d %q", resp.StatusCode, body)
-	}
-	if ct := resp.Header.Get("Content-Type"); ct != "application/json" {
-		t.Errorf("Content-Type = %q", ct)
-	}
-	if _, ok := resp.Header[http_proxy.ErrorHeader]; ok {
-		t.Errorf("relayed reply carries %s", http_proxy.ErrorHeader)
-	}
-}
-
 func TestFailuresAreMarked(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -176,15 +161,10 @@ func TestFailuresAreMarked(t *testing.T) {
 		}, http_proxy.ReasonBadReply, http.StatusBadGateway},
 		{"invalid upstream status", exitReply(t, 42, nil, rpcReply),
 			http_proxy.ReasonBadReply, http.StatusBadGateway},
-		// An exit that predates Response.Reason sends only Error.
-		{"legacy refusal", exitError("", "URI not configured in networks"),
-			http_proxy.ReasonExitRefused, http.StatusBadGateway},
-		{"legacy upstream failure", exitError("", "HTTP request failed"),
-			http_proxy.ReasonUpstreamUnreachable, http.StatusBadGateway},
-		{"legacy read failure", exitError("", "io.ReadAll(resp.Body) failed: unexpected EOF"),
-			http_proxy.ReasonUpstreamUnreachable, http.StatusBadGateway},
-		{"legacy too large", exitError("", "HTTP response is too big"),
-			http_proxy.ReasonTooLarge, http.StatusRequestEntityTooLarge},
+		{"no upstream status", exitReply(t, 0, nil, rpcReply),
+			http_proxy.ReasonBadReply, http.StatusBadGateway},
+		{"provider selection off", exitError(http_proxy.ReasonProviderSelectionOff, "this exit does not serve user-chosen provider URLs"),
+			http_proxy.ReasonProviderSelectionOff, http.StatusBadGateway},
 		{"unknown reason", exitError("from-the-future", "?"),
 			http_proxy.ReasonExitRefused, http.StatusBadGateway},
 	}
@@ -204,7 +184,7 @@ func TestFailuresAreMarked(t *testing.T) {
 func TestSendRequestRefusesOversizedRequest(t *testing.T) {
 	big := make([]byte, 2*UserForwardPayloadLength)
 	rand.Read(big) // incompressible
-	_, err := sendRequest(nil, big)
+	_, err := sendRequest(nil, big, "")
 	if !errors.Is(err, errTooLarge) {
 		t.Fatalf("err = %v, want errTooLarge", err)
 	}
@@ -239,5 +219,66 @@ func TestExposeHeadersIncludesErrorAndRelayedHeaders(t *testing.T) {
 	got := serve(h, post("https://example.org")).Header.Get("Access-Control-Expose-Headers")
 	if got != "ZKNet-Error, Content-Type, Retry-After" {
 		t.Errorf("Access-Control-Expose-Headers = %q", got)
+	}
+}
+
+// sentTo records what the (fake) mixnet was asked to carry.
+type sentTo struct {
+	request []byte
+	userURL string
+}
+
+func recordingServer(t *testing.T) (http.HandlerFunc, *[]sentTo) {
+	t.Helper()
+	var sent []sentTo
+	reply := exitReply(t, http.StatusOK, http.Header{"Content-Type": {"application/json"}}, rpcReply)
+	var buf bytes.Buffer
+	s := &Server{
+		log: log.New(&buf),
+		send: func(b []byte, userURL string) ([]byte, error) {
+			sent = append(sent, sentTo{b, userURL})
+			return reply()
+		},
+	}
+	t.Cleanup(func() {
+		if strings.Contains(buf.String(), "/v3/secret") {
+			t.Errorf("the provider URL's path reached the log:\n%s", buf.String())
+		}
+	})
+	return withCORS(s.Handler), &sent
+}
+
+func TestUserURLGoesInTheRequestNotTheHeader(t *testing.T) {
+	h, sent := recordingServer(t)
+	r := httptest.NewRequest(http.MethodPost, http_proxy.UserURLPath, strings.NewReader(`{}`))
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set(http_proxy.URLHeader, "https://rpc.example/v3/secret")
+	if resp := serve(h, r); resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	if len(*sent) != 1 || (*sent)[0].userURL != "https://rpc.example/v3/secret" {
+		t.Fatalf("sent %+v", *sent)
+	}
+	if bytes.Contains(bytes.ToLower((*sent)[0].request), []byte("zknet-url")) || bytes.Contains((*sent)[0].request, []byte("secret")) {
+		t.Errorf("the inner request still carries the URL:\n%s", (*sent)[0].request)
+	}
+}
+
+func TestURLHeaderIsIgnoredOffTheUserURLPath(t *testing.T) {
+	h, sent := recordingServer(t)
+	r := post("")
+	r.Header.Set(http_proxy.URLHeader, "https://rpc.example/v3/secret")
+	serve(h, r)
+	if len(*sent) != 1 || (*sent)[0].userURL != "" || bytes.Contains((*sent)[0].request, []byte("secret")) {
+		t.Errorf("a network-key request carried the URL: %+v", *sent)
+	}
+}
+
+func TestUserURLPathWithoutHeaderIsRefusedLocally(t *testing.T) {
+	h, sent := recordingServer(t)
+	r := httptest.NewRequest(http.MethodPost, http_proxy.UserURLPath, strings.NewReader(`{}`))
+	checkFailure(t, serve(h, r), http_proxy.ReasonExitRefused, http.StatusBadGateway)
+	if len(*sent) != 0 {
+		t.Errorf("sent %d requests, want 0", len(*sent))
 	}
 }

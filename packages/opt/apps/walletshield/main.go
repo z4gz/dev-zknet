@@ -53,25 +53,18 @@ const healthPath = "/_/health"
 // failureStatus is the HTTP status of each reply WalletShield originates
 // instead of relaying from the upstream.
 var failureStatus = map[string]int{
-	http_proxy.ReasonMixTimeout:          http.StatusGatewayTimeout,
-	http_proxy.ReasonExitRefused:         http.StatusBadGateway,
-	http_proxy.ReasonUpstreamUnreachable: http.StatusBadGateway,
-	http_proxy.ReasonTooLarge:            http.StatusRequestEntityTooLarge,
-	http_proxy.ReasonBadReply:            http.StatusBadGateway,
-	http_proxy.ReasonExitBusy:            http.StatusServiceUnavailable,
+	http_proxy.ReasonMixTimeout:           http.StatusGatewayTimeout,
+	http_proxy.ReasonExitRefused:          http.StatusBadGateway,
+	http_proxy.ReasonUpstreamUnreachable:  http.StatusBadGateway,
+	http_proxy.ReasonTooLarge:             http.StatusRequestEntityTooLarge,
+	http_proxy.ReasonBadReply:             http.StatusBadGateway,
+	http_proxy.ReasonExitBusy:             http.StatusServiceUnavailable,
+	http_proxy.ReasonProviderSelectionOff: http.StatusBadGateway,
 }
 
-// legacyErrorReasons classifies, by prefix, the Error strings that an exit
-// predating Response.Reason sends after it has contacted the upstream. Any
-// other Error from such an exit is ReasonExitRefused.
-var legacyErrorReasons = map[string]string{
-	"HTTP request failed":          http_proxy.ReasonUpstreamUnreachable,
-	"io.ReadAll(resp.Body) failed": http_proxy.ReasonUpstreamUnreachable,
-	"Failed to compress response":  http_proxy.ReasonUpstreamUnreachable,
-	"HTTP response is too big":     http_proxy.ReasonTooLarge,
-}
-
-func sendRequest(thin *thin.ThinClient, httpRequestBytes []byte) ([]byte, error) {
+// sendRequest carries one serialized HTTP request to the exit. userURL, when
+// not empty, is the upstream the user chose (http_proxy.Request.URL).
+func sendRequest(thin *thin.ThinClient, httpRequestBytes []byte, userURL string) ([]byte, error) {
 	// Compress the HTTP request
 	compressedPayload, err := common.CompressData(httpRequestBytes)
 	if err != nil {
@@ -81,6 +74,7 @@ func sendRequest(thin *thin.ThinClient, httpRequestBytes []byte) ([]byte, error)
 	// Create the request wrapper
 	request := &http_proxy.Request{
 		Payload: compressedPayload,
+		URL:     userURL,
 	}
 
 	// Marshal to CBOR
@@ -117,9 +111,9 @@ type Server struct {
 	daemon *client.Daemon
 	thin   *thin.ThinClient
 
-	// send carries one serialized HTTP request over the mixnet and returns the
-	// raw reply.
-	send func(httpRequestBytes []byte) ([]byte, error)
+	// send carries one serialized HTTP request, and the user's provider URL
+	// when there is one, over the mixnet and returns the raw reply.
+	send func(httpRequestBytes []byte, userURL string) ([]byte, error)
 }
 
 // setListenAddress overrides the address of the client daemon's configured
@@ -267,7 +261,7 @@ func main() {
 		thin:   thin,
 		daemon: d,
 	}
-	server.send = func(b []byte) ([]byte, error) { return sendRequest(thin, b) }
+	server.send = func(b []byte, userURL string) ([]byte, error) { return sendRequest(thin, b, userURL) }
 
 	if testProbe {
 		server.SendTestProbes(testProbeSendDelay, testProbeCount, testProbeResponseDelay)
@@ -302,12 +296,30 @@ func (s *Server) Handler(w http.ResponseWriter, req *http.Request) {
 	req.URL = myurl
 	req.RequestURI = ""
 
+	// Provider selection: POST /_/url names its upstream in URLHeader. The
+	// header never crosses the mixnet; only the URL's host is logged.
+	userURL := req.Header.Get(http_proxy.URLHeader)
+	req.Header.Del(http_proxy.URLHeader)
+	if myurl.Path == http_proxy.UserURLPath {
+		if userURL == "" {
+			writeFailure(w, http_proxy.ReasonExitRefused, fmt.Sprintf("POST %s needs a %s header", http_proxy.UserURLPath, http_proxy.URLHeader))
+			return
+		}
+		host := "(unparsable)"
+		if u, err := url.Parse(userURL); err == nil {
+			host = u.Host
+		}
+		s.log.Infof("Provider host %s", host)
+	} else {
+		userURL = ""
+	}
+
 	buf := new(bytes.Buffer)
 	req.Write(buf)
 
 	s.log.Debugf("RAW HTTP REQUEST:\n%s", string(buf.Bytes()))
 
-	rawReply, err := s.send(buf.Bytes())
+	rawReply, err := s.send(buf.Bytes(), userURL)
 	if err != nil {
 		s.log.Errorf("Failed to send message: %s", err)
 		if errors.Is(err, errTooLarge) {
@@ -344,12 +356,6 @@ func (s *Server) Handler(w http.ResponseWriter, req *http.Request) {
 
 	status := response.Status
 	header := http_proxy.FilterHeaders(response.Header)
-	if status == 0 {
-		// An exit that predates Response.Status relays neither status nor
-		// headers; keep the reply that WalletShield gave before.
-		status = http.StatusOK
-		header.Set("Content-Type", "application/json")
-	}
 	if status < 200 || status > 599 {
 		s.log.Errorf("Invalid upstream status %d", status)
 		writeFailure(w, http_proxy.ReasonBadReply, fmt.Sprintf("invalid upstream status %d", status))
@@ -370,16 +376,11 @@ func (s *Server) Handler(w http.ResponseWriter, req *http.Request) {
 	w.Write(responsePayload)
 }
 
-// exitReason returns the Reason of an exit error reply, classifying the Error
-// string of an exit that predates Response.Reason.
+// exitReason returns the Reason of an exit error reply; a reason this
+// WalletShield does not know is ReasonExitRefused.
 func exitReason(r *http_proxy.Response) string {
 	if _, ok := failureStatus[r.Reason]; ok {
 		return r.Reason
-	}
-	for prefix, reason := range legacyErrorReasons {
-		if strings.HasPrefix(r.Error, prefix) {
-			return reason
-		}
 	}
 	return http_proxy.ReasonExitRefused
 }
@@ -422,7 +423,7 @@ func (s *Server) SendTestProbes(testProbeSendDelay int, testProbeCount int, test
 		packetsTransmitted++
 		t := time.Now()
 
-		_, err = sendRequest(s.thin, httpRequestBytes)
+		_, err = sendRequest(s.thin, httpRequestBytes, "")
 		elapsed := time.Since(t).Seconds()
 		if err != nil {
 			s.log.Errorf("Probe failed after %.2fs: %s", elapsed, err)

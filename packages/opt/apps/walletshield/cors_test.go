@@ -25,13 +25,13 @@ func testServer(t *testing.T) (http.HandlerFunc, *int) {
 	sent := 0
 	s := &Server{
 		log: log.New(io.Discard),
-		send: func(b []byte) ([]byte, error) {
+		send: func(b []byte, _ string) ([]byte, error) {
 			sent++
 			payload, err := common.CompressData([]byte(rpcReply))
 			if err != nil {
 				return nil, err
 			}
-			return cbor.Marshal(&http_proxy.Response{Payload: payload})
+			return cbor.Marshal(&http_proxy.Response{Payload: payload, Status: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}})
 		},
 	}
 	return withCORS(s.Handler), &sent

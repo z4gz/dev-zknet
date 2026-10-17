@@ -46,6 +46,18 @@ type Response struct {
 	Header http.Header `cbor:",omitempty"`
 }
 
+// UserURLPath is WalletShield's local endpoint for provider selection: a
+// POST there is sent to the exit with Request.URL set from URLHeader. It
+// sits in the "_" namespace the exit reserves, so it never names a
+// [Networks] key.
+const UserURLPath = "/_/url"
+
+// URLHeader carries the user's provider URL from the caller to WalletShield.
+// It is a header rather than a query parameter so the URL, which often embeds
+// an API key, stays out of request lines and access logs. It never crosses
+// the mixnet as a header.
+const URLHeader = "ZKNet-URL"
+
 // ErrorHeader marks a reply that WalletShield or the exit originated rather
 // than relayed from the upstream. Its value is one of the Reason* values.
 const ErrorHeader = "ZKNet-Error"
