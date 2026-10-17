@@ -165,6 +165,8 @@ func TestFailuresAreMarked(t *testing.T) {
 			http_proxy.ReasonUpstreamUnreachable, http.StatusBadGateway},
 		{"reply too large", exitError(http_proxy.ReasonTooLarge, "HTTP response is too big"),
 			http_proxy.ReasonTooLarge, http.StatusRequestEntityTooLarge},
+		{"exit busy", exitError(http_proxy.ReasonExitBusy, "the exit is serving its maximum number of requests"),
+			http_proxy.ReasonExitBusy, http.StatusServiceUnavailable},
 		{"undecodable reply", func() ([]byte, error) { return []byte{0xff, 0x00}, nil },
 			http_proxy.ReasonBadReply, http.StatusBadGateway},
 		{"empty reply", func() ([]byte, error) { return nil, nil },

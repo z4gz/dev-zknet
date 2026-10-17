@@ -6,7 +6,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path"
@@ -122,6 +121,10 @@ type proxyRequestHandler struct {
 	cfg            *http_proxy.Config
 	log            *logging.Logger
 	maxPayloadSize int
+	networks       *http.Client
+
+	// slots holds one token per request in flight.
+	slots chan struct{}
 
 	write func(cborplugin.Command)
 }
@@ -131,147 +134,181 @@ func New(cfg *http_proxy.Config, log *logging.Logger, maxPayloadSize int) *proxy
 		cfg:            cfg,
 		log:            log,
 		maxPayloadSize: maxPayloadSize,
+		networks:       http_proxy.NewNetworksClient(),
+		slots:          make(chan struct{}, http_proxy.ExitConcurrency),
 	}
 }
 
-// OnCommand processes a request and returns a response
-func (s *proxyRequestHandler) OnCommand(cmd cborplugin.Command) (err error) {
-	s.log.Info("OnCommand begin")
-	defer s.log.Info("OnCommand end")
-
-	switch r := cmd.(type) {
-	case *cborplugin.Request:
-		// The plugin serves every request from this one goroutine, and the
-		// mix server does not restart a plugin that dies: a panic must cost
-		// one request, not the service.
-		defer func() {
-			if p := recover(); p != nil {
-				s.log.Errorf("OnCommand panic: %v", p)
-				err = s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, "internal error")
-			}
-		}()
-
-		// plugin protocol 2: the mix server asks for parameters to publish
-		// in its descriptor; we have none
-		if r.IsParametersRequest {
-			go s.write(cborplugin.NewParametersResponse(nil))
-			return nil
-		}
-
-		if r.SURB == nil {
-			errMsg := "no SURB, cannot reply"
-			s.log.Error(errMsg)
-			return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, errMsg)
-		}
-
-		// the padding bytes were not stripped because
-		// without parsing the start of Payload we wont
-		// know how long it is, so we will use a streaming
-		// decoder and simply return the first cbor object
-		// and then discard the decoder and buffer
-		req := &http_proxy.Request{}
-		dec := cbor.NewDecoder(bytes.NewReader(r.Payload))
-		err = dec.Decode(req)
-		if err != nil {
-			s.log.Errorf("dec.Decode(req) failed: %s", err)
-			return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, "Error decoding request")
-		}
-
-		s.log.Debugf("Raw request payload: %s", req.Payload)
-
-		requestPayload, err := common.DecompressData(req.Payload)
-		if err != nil {
-			s.log.Errorf("common.DecompressData failed: %s", err)
-			return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, "Failed to decompress request")
-		}
-		request, err := http.ReadRequest(bufio.NewReader(bytes.NewReader(requestPayload)))
-		if err != nil {
-			s.log.Errorf("http.ReadRequest failed: %s", err)
-			return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, "Failed to read HTTP request")
-		}
-
-		s.log.Debugf("Request URL Path: %s", request.URL.Path)
-		s.log.Debugf("Request payload: %s", requestPayload)
-
-		err = validateRequestURL(request.URL.Path)
-		if err != nil {
-			s.log.Errorf("validateRequestURL failed: %s", err)
-			return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, fmt.Sprintf("validateRequestURL failed: %s", err.Error()))
-		}
-
-		if match, _ := regexp.MatchString("^/_/probe.*", request.URL.Path); match {
-			segments := strings.Split(request.URL.Path, "/")
-			if len(segments) >= 4 {
-				responseDelay, err := strconv.Atoi(segments[3])
-				if err == nil && responseDelay > 0 {
-					s.log.Infof("probe: delaying response for %ds", responseDelay)
-					time.Sleep(time.Duration(responseDelay) * time.Second)
-				}
-			}
-			go s.write(&cborplugin.Response{ID: r.ID, SURB: r.SURB, Payload: nil})
-			return nil
-		}
-
-		uri := request.URL.Path
-		uri = uri[1:]
-		target, ok := s.cfg.Networks[uri]
-		if !ok {
-			s.log.Error("URI not matched with config Networks")
-			return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, "URI not configured in networks")
-		}
-
-		newRequest, err := http.NewRequest(request.Method, target, request.Body)
-		if err != nil {
-			s.log.Errorf("http.NewRequest failed: %s", err)
-			return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, "Failed to create HTTP request")
-		}
-
-		newRequest.Header.Set("Content-Type", request.Header.Get("Content-Type"))
-		newRequest.Header.Set("Content-Length", request.Header.Get("Content-Length"))
-
-		resp, err := http.DefaultClient.Do(newRequest)
-		if err != nil {
-			s.log.Errorf("http.DefaultClient.Do failed: %s", err)
-			return s.sendError(r.ID, r.SURB, http_proxy.ReasonUpstreamUnreachable, "HTTP request failed")
-		}
-		defer resp.Body.Close()
-
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			s.log.Errorf("io.ReadAll(resp.Body) failed: %s", err)
-			return s.sendError(r.ID, r.SURB, http_proxy.ReasonUpstreamUnreachable, fmt.Sprintf("io.ReadAll(resp.Body) failed: %s", err.Error()))
-		}
-
-		s.log.Debugf("Reply status %d, payload: %s", resp.StatusCode, body)
-
-		responsePayload, err := common.CompressData(body)
-		if err != nil {
-			s.log.Errorf("common.CompressData failed: %s", err)
-			return s.sendError(r.ID, r.SURB, http_proxy.ReasonUpstreamUnreachable, "Failed to compress response")
-		}
-		response := &http_proxy.Response{
-			Payload: responsePayload,
-			Status:  resp.StatusCode,
-			Header:  http_proxy.FilterHeaders(resp.Header),
-		}
-
-		payload, err := cbor.Marshal(response)
-		if err != nil {
-			s.log.Errorf("cbor.Marshal(response) failed: %s", err)
-			return s.sendError(r.ID, r.SURB, http_proxy.ReasonUpstreamUnreachable, "Error marshaling response")
-		}
-		if len(payload) > s.maxPayloadSize {
-			s.log.Error("HTTP response exceeds max Sphinx payload")
-			return s.sendError(r.ID, r.SURB, http_proxy.ReasonTooLarge, "HTTP response is too big")
-		}
-
-		go s.write(&cborplugin.Response{ID: r.ID, SURB: r.SURB, Payload: payload})
-		return nil
-	default:
+// OnCommand takes one command from the mix server. The plugin server calls it
+// from a single goroutine, so it never waits on an upstream: each request is
+// served on its own goroutine, at most ExitConcurrency at once.
+func (s *proxyRequestHandler) OnCommand(cmd cborplugin.Command) error {
+	r, ok := cmd.(*cborplugin.Request)
+	if !ok {
 		errMsg := "invalid Command type"
 		s.log.Error(errMsg)
 		return errors.New(errMsg)
 	}
+
+	// plugin protocol 2: the mix server asks for parameters to publish
+	// in its descriptor; we have none
+	if r.IsParametersRequest {
+		go s.write(cborplugin.NewParametersResponse(nil))
+		return nil
+	}
+
+	if r.SURB == nil {
+		errMsg := "no SURB, cannot reply"
+		s.log.Error(errMsg)
+		return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, errMsg)
+	}
+
+	select {
+	case s.slots <- struct{}{}:
+	default:
+		s.log.Warningf("busy: %d requests in flight", http_proxy.ExitConcurrency)
+		return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitBusy, "the exit is serving its maximum number of requests")
+	}
+	go func() {
+		defer func() { <-s.slots }()
+		s.serve(r)
+	}()
+	return nil
+}
+
+// serve answers one request. A panic costs that request, never the plugin:
+// the mix server does not restart a plugin that dies.
+func (s *proxyRequestHandler) serve(r *cborplugin.Request) {
+	defer func() {
+		if p := recover(); p != nil {
+			s.log.Errorf("serve panic: %v", p)
+			s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, "internal error")
+		}
+	}()
+	if err := s.handle(r); err != nil {
+		s.log.Debugf("request %d: %s", r.ID, err)
+	}
+}
+
+func (s *proxyRequestHandler) handle(r *cborplugin.Request) error {
+	// the padding bytes were not stripped because
+	// without parsing the start of Payload we wont
+	// know how long it is, so we will use a streaming
+	// decoder and simply return the first cbor object
+	// and then discard the decoder and buffer
+	req := &http_proxy.Request{}
+	dec := cbor.NewDecoder(bytes.NewReader(r.Payload))
+	if err := dec.Decode(req); err != nil {
+		s.log.Errorf("dec.Decode(req) failed: %s", err)
+		return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, "Error decoding request")
+	}
+
+	requestPayload, err := http_proxy.DecompressLimited(req.Payload, http_proxy.MaxDecompressedRequestBytes)
+	if errors.Is(err, http_proxy.ErrTooLarge) {
+		return s.sendError(r.ID, r.SURB, http_proxy.ReasonTooLarge, "request too large")
+	}
+	if err != nil {
+		s.log.Errorf("decompress failed: %s", err)
+		return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, "Failed to decompress request")
+	}
+	request, err := http.ReadRequest(bufio.NewReader(bytes.NewReader(requestPayload)))
+	if err != nil {
+		s.log.Errorf("http.ReadRequest failed: %s", err)
+		return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, "Failed to read HTTP request")
+	}
+
+	s.log.Debugf("Request URL Path: %s", request.URL.Path)
+
+	err = validateRequestURL(request.URL.Path)
+	if err != nil {
+		s.log.Errorf("validateRequestURL failed: %s", err)
+		return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, fmt.Sprintf("validateRequestURL failed: %s", err.Error()))
+	}
+
+	if match, _ := regexp.MatchString("^/_/probe.*", request.URL.Path); match {
+		segments := strings.Split(request.URL.Path, "/")
+		if len(segments) >= 4 {
+			responseDelay, err := strconv.Atoi(segments[3])
+			if err == nil && responseDelay > 0 {
+				delay := min(time.Duration(responseDelay)*time.Second, http_proxy.UpstreamTimeout)
+				s.log.Infof("probe: delaying response for %s", delay)
+				time.Sleep(delay)
+			}
+		}
+		go s.write(&cborplugin.Response{ID: r.ID, SURB: r.SURB, Payload: nil})
+		return nil
+	}
+
+	uri := request.URL.Path
+	uri = uri[1:]
+	target, ok := s.cfg.Networks[uri]
+	if !ok {
+		s.log.Error("URI not matched with config Networks")
+		return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, "URI not configured in networks")
+	}
+
+	return s.relay(r, s.networks, target, request)
+}
+
+// relay sends the inner request's body and Content-Type to target and
+// answers with the upstream's status, relayed headers and body.
+func (s *proxyRequestHandler) relay(r *cborplugin.Request, client *http.Client, target string, request *http.Request) error {
+	body, err := http_proxy.ReadLimited(request.Body, http_proxy.MaxRequestBodyBytes)
+	if errors.Is(err, http_proxy.ErrTooLarge) {
+		return s.sendError(r.ID, r.SURB, http_proxy.ReasonTooLarge, "request body too large")
+	}
+	if err != nil {
+		return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, "Failed to read request body")
+	}
+
+	newRequest, err := http.NewRequest(request.Method, target, bytes.NewReader(body))
+	if err != nil {
+		s.log.Errorf("http.NewRequest failed: %s", err)
+		return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, "Failed to create HTTP request")
+	}
+	newRequest.Header.Set("Content-Type", request.Header.Get("Content-Type"))
+
+	resp, err := client.Do(newRequest)
+	if err != nil {
+		s.log.Errorf("upstream request failed: %s", err)
+		return s.sendError(r.ID, r.SURB, http_proxy.ReasonUpstreamUnreachable, "HTTP request failed")
+	}
+	defer resp.Body.Close()
+
+	respBody, err := http_proxy.ReadLimited(resp.Body, http_proxy.MaxResponseBodyBytes)
+	if errors.Is(err, http_proxy.ErrTooLarge) {
+		return s.sendError(r.ID, r.SURB, http_proxy.ReasonTooLarge, "HTTP response is too big")
+	}
+	if err != nil {
+		s.log.Errorf("reading upstream reply failed: %s", err)
+		return s.sendError(r.ID, r.SURB, http_proxy.ReasonUpstreamUnreachable, "reading the upstream reply failed")
+	}
+
+	s.log.Debugf("Reply status %d, %d bytes", resp.StatusCode, len(respBody))
+
+	responsePayload, err := common.CompressData(respBody)
+	if err != nil {
+		s.log.Errorf("common.CompressData failed: %s", err)
+		return s.sendError(r.ID, r.SURB, http_proxy.ReasonUpstreamUnreachable, "Failed to compress response")
+	}
+	response := &http_proxy.Response{
+		Payload: responsePayload,
+		Status:  resp.StatusCode,
+		Header:  http_proxy.FilterHeaders(resp.Header),
+	}
+
+	payload, err := cbor.Marshal(response)
+	if err != nil {
+		s.log.Errorf("cbor.Marshal(response) failed: %s", err)
+		return s.sendError(r.ID, r.SURB, http_proxy.ReasonUpstreamUnreachable, "Error marshaling response")
+	}
+	if len(payload) > s.maxPayloadSize {
+		s.log.Error("HTTP response exceeds max Sphinx payload")
+		return s.sendError(r.ID, r.SURB, http_proxy.ReasonTooLarge, "HTTP response is too big")
+	}
+
+	go s.write(&cborplugin.Response{ID: r.ID, SURB: r.SURB, Payload: payload})
+	return nil
 }
 
 // sendError replies with an exit-originated failure. reason is one of the

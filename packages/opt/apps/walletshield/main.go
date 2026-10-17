@@ -58,6 +58,7 @@ var failureStatus = map[string]int{
 	http_proxy.ReasonUpstreamUnreachable: http.StatusBadGateway,
 	http_proxy.ReasonTooLarge:            http.StatusRequestEntityTooLarge,
 	http_proxy.ReasonBadReply:            http.StatusBadGateway,
+	http_proxy.ReasonExitBusy:            http.StatusServiceUnavailable,
 }
 
 // legacyErrorReasons classifies, by prefix, the Error strings that an exit

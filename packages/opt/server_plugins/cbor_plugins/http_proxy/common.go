@@ -49,6 +49,8 @@ const (
 	ReasonUpstreamUnreachable = "upstream-unreachable"
 	ReasonTooLarge            = "too-large"
 	ReasonBadReply            = "bad-reply"
+	// ReasonExitBusy: the exit already serves ExitConcurrency requests.
+	ReasonExitBusy = "exit-busy"
 )
 
 // RelayedHeaders lists the upstream response headers carried back across the
