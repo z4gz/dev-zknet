@@ -110,7 +110,9 @@ func main() {
 }
 
 func validateRequestURL(uri string) error {
-	if string(uri)[0] != '/' {
+	// An absolute-form request line with no path ("POST https://x HTTP/1.1")
+	// parses with an empty path.
+	if uri == "" || uri[0] != '/' {
 		return errors.New("uri must start with a slash")
 	}
 	return nil
@@ -133,12 +135,22 @@ func New(cfg *http_proxy.Config, log *logging.Logger, maxPayloadSize int) *proxy
 }
 
 // OnCommand processes a request and returns a response
-func (s *proxyRequestHandler) OnCommand(cmd cborplugin.Command) error {
+func (s *proxyRequestHandler) OnCommand(cmd cborplugin.Command) (err error) {
 	s.log.Info("OnCommand begin")
 	defer s.log.Info("OnCommand end")
 
 	switch r := cmd.(type) {
 	case *cborplugin.Request:
+		// The plugin serves every request from this one goroutine, and the
+		// mix server does not restart a plugin that dies: a panic must cost
+		// one request, not the service.
+		defer func() {
+			if p := recover(); p != nil {
+				s.log.Errorf("OnCommand panic: %v", p)
+				err = s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, "internal error")
+			}
+		}()
+
 		// plugin protocol 2: the mix server asks for parameters to publish
 		// in its descriptor; we have none
 		if r.IsParametersRequest {
@@ -159,7 +171,7 @@ func (s *proxyRequestHandler) OnCommand(cmd cborplugin.Command) error {
 		// and then discard the decoder and buffer
 		req := &http_proxy.Request{}
 		dec := cbor.NewDecoder(bytes.NewReader(r.Payload))
-		err := dec.Decode(req)
+		err = dec.Decode(req)
 		if err != nil {
 			s.log.Errorf("dec.Decode(req) failed: %s", err)
 			return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, "Error decoding request")

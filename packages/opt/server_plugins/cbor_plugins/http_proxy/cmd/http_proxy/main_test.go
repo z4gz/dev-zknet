@@ -137,3 +137,40 @@ func TestParametersRequestIsAnswered(t *testing.T) {
 		t.Fatal("no reply")
 	}
 }
+
+// rawRoundTrip sends one serialized HTTP request through the exit handler.
+func rawRoundTrip(t *testing.T, cfg *http_proxy.Config, raw string) *http_proxy.Response {
+	t.Helper()
+	compressed, err := common.CompressData([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, _ := cbor.Marshal(&http_proxy.Request{Payload: compressed})
+	h := New(cfg, logging.MustGetLogger("test"), DefaultUserForwardPayloadLength-payloadMargin)
+	replies := make(chan []byte, 1)
+	h.write = func(cmd cborplugin.Command) { replies <- cmd.(*cborplugin.Response).Payload }
+	h.OnCommand(&cborplugin.Request{ID: 1, SURB: []byte("surb"), Payload: payload})
+	select {
+	case p := <-replies:
+		return decode(t, p)
+	case <-time.After(5 * time.Second):
+		t.Fatal("no reply")
+		return nil
+	}
+}
+
+// An absolute-form request line with no path once crashed the plugin.
+func TestEmptyPathIsRefusedNotAPanic(t *testing.T) {
+	r := rawRoundTrip(t, &http_proxy.Config{}, "POST https://x HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n")
+	if r.Reason != http_proxy.ReasonExitRefused {
+		t.Errorf("reply = {Reason: %q, Error: %q}, want %q", r.Reason, r.Error, http_proxy.ReasonExitRefused)
+	}
+}
+
+// Any panic while serving a request answers that request and leaves the plugin running.
+func TestPanicAnswersExitRefused(t *testing.T) {
+	r := rawRoundTrip(t, nil, "POST /net HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n") // nil config panics
+	if r.Reason != http_proxy.ReasonExitRefused || r.Error != "internal error" {
+		t.Errorf("reply = {Reason: %q, Error: %q}, want internal error", r.Reason, r.Error)
+	}
+}
