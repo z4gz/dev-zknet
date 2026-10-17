@@ -1,8 +1,11 @@
 package http_proxy
 
 import (
+	"crypto/x509"
 	"errors"
+	"fmt"
 	"net/http"
+	"net/netip"
 	"os"
 
 	"github.com/BurntSushi/toml"
@@ -10,8 +13,16 @@ import (
 
 // Request is the type which is serialized into the cborplugin request payload.
 type Request struct {
-	// Payload contains the proxied http request
+	// Payload contains the proxied http request (origin-form, compressed).
+	// The exit forwards its body and Content-Type.
 	Payload []byte
+
+	// URL, when set, is the upstream the user chose: provider selection,
+	// served in the shape of Anon-RPC SPEC v0.3.2 §3.2 "general web request
+	// access" but limited to JSON-RPC POST to a public https URL. The exit
+	// fetches it under the destination policy instead of a [Networks]
+	// entry. When empty, the Payload's path selects the [Networks] entry.
+	URL string `cbor:",omitempty"`
 }
 
 // Response is the type which is serialized and sent as a response from the cborplugin.
@@ -22,10 +33,7 @@ type Response struct {
 	// Error if not empty indicates an error condition.
 	Error string
 
-	// The fields below were added after Payload and Error. They are omitted
-	// when empty, so an old peer neither sends nor expects them: an old
-	// decoder ignores unknown CBOR map keys, and a new decoder reads their
-	// absence as the zero value.
+	// The fields below are omitted when empty.
 
 	// Reason classifies Error as one of the Reason* values.
 	Reason string `cbor:",omitempty"`
@@ -51,6 +59,10 @@ const (
 	ReasonBadReply            = "bad-reply"
 	// ReasonExitBusy: the exit already serves ExitConcurrency requests.
 	ReasonExitBusy = "exit-busy"
+	// ReasonProviderSelectionOff: the operator turned [UserURLs] off. The
+	// exit never falls back to [Networks] for a user-chosen URL, because a
+	// user who chose a provider expects that provider.
+	ReasonProviderSelectionOff = "provider-selection-off"
 )
 
 // RelayedHeaders lists the upstream response headers carried back across the
@@ -77,13 +89,50 @@ func FilterHeaders(h http.Header) http.Header {
 }
 
 type Config struct {
-	Networks map[string]string // e.g. "ethereum.mainnet" -> "https://ethereum-rpc.publicnode.com"
+	Networks map[string]string // e.g. "ethereum/sepolia" -> "https://ethereum-sepolia-rpc.publicnode.com"
+	UserURLs UserURLs
+
+	// Policy and Roots are derived from UserURLs by Validate.
+	Policy Policy         `toml:"-"`
+	Roots  *x509.CertPool `toml:"-"`
+}
+
+// UserURLs configures provider selection: requests that carry Request.URL.
+type UserURLs struct {
+	// Enable serves user-chosen URLs. On unless the config turns it off;
+	// when off, such requests are refused with ReasonProviderSelectionOff.
+	Enable bool
+	// AllowCIDRs are prefixes the destination policy permits anyway. Test
+	// beds only.
+	AllowCIDRs []string
+	// RootCAs is a PEM file that replaces the system roots for user-chosen
+	// URLs. Test beds only.
+	RootCAs string
 }
 
 func (c *Config) Validate() error {
 	for k, v := range c.Networks {
 		if k == "" || v == "" {
 			return errors.New("invalid entry found in config, cannot map to/from empty string")
+		}
+	}
+	c.Policy = Policy{}
+	for _, s := range c.UserURLs.AllowCIDRs {
+		p, err := netip.ParsePrefix(s)
+		if err != nil {
+			return fmt.Errorf("UserURLs.AllowCIDRs: %w", err)
+		}
+		c.Policy.Allow = append(c.Policy.Allow, p.Masked())
+	}
+	c.Roots = nil
+	if c.UserURLs.RootCAs != "" {
+		pem, err := os.ReadFile(c.UserURLs.RootCAs)
+		if err != nil {
+			return fmt.Errorf("UserURLs.RootCAs: %w", err)
+		}
+		c.Roots = x509.NewCertPool()
+		if !c.Roots.AppendCertsFromPEM(pem) {
+			return fmt.Errorf("UserURLs.RootCAs: no certificate in %s", c.UserURLs.RootCAs)
 		}
 	}
 	return nil
@@ -96,7 +145,7 @@ func Load(b []byte) (*Config, error) {
 		return nil, errors.New("No nil buffer as config file")
 	}
 
-	cfg := new(Config)
+	cfg := &Config{UserURLs: UserURLs{Enable: true}}
 	err := toml.Unmarshal(b, cfg)
 	if err != nil {
 		return nil, err

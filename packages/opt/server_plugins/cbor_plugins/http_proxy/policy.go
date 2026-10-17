@@ -8,9 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"syscall"
 
 	"github.com/ZeroKnowledgeNetwork/opt/common"
@@ -149,4 +151,42 @@ func DecompressLimited(data []byte, max int64) ([]byte, error) {
 	r := flate.NewReader(bytes.NewReader(data))
 	defer r.Close()
 	return ReadLimited(r, max)
+}
+
+// CheckUserRequest checks a user-chosen upstream before anything is dialed:
+// a JSON-RPC POST to an absolute https URL without credentials. It returns
+// the URL to fetch, without its fragment. Where the URL's host resolves is
+// checked later, at dial time.
+func CheckUserRequest(rawURL, method, contentType string) (*url.URL, error) {
+	if len(rawURL) > MaxURLLength {
+		return nil, fmt.Errorf("the provider URL is longer than %d bytes", MaxURLLength)
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, errors.New("the provider URL does not parse")
+	}
+	if u.Scheme != "https" || u.Host == "" {
+		return nil, errors.New("a provider URL must be an absolute https URL")
+	}
+	if u.User != nil {
+		return nil, errors.New("a provider URL must not carry credentials")
+	}
+	if method != http.MethodPost {
+		return nil, errors.New("provider selection serves JSON-RPC POST only")
+	}
+	if mt, _, err := mime.ParseMediaType(contentType); err != nil || mt != "application/json" {
+		return nil, errors.New("provider selection serves JSON-RPC (application/json) only")
+	}
+	u.Fragment, u.RawFragment = "", ""
+	return u, nil
+}
+
+// LogSafe describes err without the request URL a *url.Error carries: a
+// provider URL often embeds an API key.
+func LogSafe(err error) string {
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		return ue.Op + ": " + ue.Err.Error()
+	}
+	return err.Error()
 }

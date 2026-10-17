@@ -17,3 +17,13 @@
   "solana/devnet" = "https://api.devnet.solana.com"
   "xdc" = "https://erpc.xinfin.network"
   "xdc/apothem" = "https://earpc.apothem.network"
+
+# Provider selection: requests that name their own upstream URL. Every exit
+# offers it by default; false refuses such requests with
+# "provider-selection-off" and never answers them from [Networks].
+[UserURLs]
+  Enable = true
+  # Test beds only: prefixes the destination policy permits anyway, and a PEM
+  # file of CAs that replaces the system roots for user-chosen URLs.
+  AllowCIDRs = []
+  RootCAs = ""

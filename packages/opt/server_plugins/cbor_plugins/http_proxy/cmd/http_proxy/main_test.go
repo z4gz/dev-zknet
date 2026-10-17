@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"crypto/rand"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"reflect"
 	"strings"
 	"testing"
@@ -146,6 +148,9 @@ func TestParametersRequestIsAnswered(t *testing.T) {
 
 // rawRoundTrip sends one serialized HTTP request through the exit handler.
 func rawRoundTrip(t *testing.T, cfg *http_proxy.Config, raw string) *http_proxy.Response {
+	if cfg == nil {
+		cfg = &http_proxy.Config{}
+	}
 	t.Helper()
 	compressed, err := common.CompressData([]byte(raw))
 	if err != nil {
@@ -175,8 +180,10 @@ func TestEmptyPathIsRefusedNotAPanic(t *testing.T) {
 
 // Any panic while serving a request answers that request and leaves the plugin running.
 func TestPanicAnswersExitRefused(t *testing.T) {
-	r := rawRoundTrip(t, nil, "POST /net HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n") // nil config panics
-	if r.Reason != http_proxy.ReasonExitRefused || r.Error != "internal error" {
+	h, replies := handler(&http_proxy.Config{})
+	h.cfg = nil // reading the config panics
+	send(t, h, 1, "/net", nil)
+	if r := <-replies; r.Reason != http_proxy.ReasonExitRefused || r.Error != "internal error" {
 		t.Errorf("reply = {Reason: %q, Error: %q}, want internal error", r.Reason, r.Error)
 	}
 }
@@ -268,5 +275,107 @@ func TestHungUpstreamIsUpstreamUnreachable(t *testing.T) {
 	send(t, h, 1, "/hung", []byte(`{}`))
 	if r := <-replies; r.Reason != http_proxy.ReasonUpstreamUnreachable {
 		t.Errorf("reply = {Reason: %q, Error: %q}, want %q", r.Reason, r.Error, http_proxy.ReasonUpstreamUnreachable)
+	}
+}
+
+// sendURL sends a request that names its own upstream.
+func sendURL(t *testing.T, h *proxyRequestHandler, rawURL, method, contentType string) {
+	t.Helper()
+	req, _ := http.NewRequest(method, "http://nowhere/_/url", strings.NewReader(`{"id":1}`))
+	req.Header.Set("Content-Type", contentType)
+	buf := new(bytes.Buffer)
+	req.Write(buf)
+	compressed, _ := common.CompressData(buf.Bytes())
+	payload, _ := cbor.Marshal(&http_proxy.Request{Payload: compressed, URL: rawURL})
+	h.OnCommand(&cborplugin.Request{ID: 1, SURB: []byte("surb"), Payload: payload})
+}
+
+// tlsUpstream is an https stub, and the exit config that lets the policy
+// reach it: loopback allowed, its CA trusted.
+func tlsUpstream(t *testing.T, h http.HandlerFunc) (*httptest.Server, *http_proxy.Config, *bool) {
+	t.Helper()
+	dialed := new(bool)
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		*dialed = true
+		h(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	cfg := &http_proxy.Config{
+		UserURLs: http_proxy.UserURLs{Enable: true},
+		Policy:   http_proxy.Policy{Allow: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}},
+		Roots:    srv.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs,
+	}
+	return srv, cfg, dialed
+}
+
+func TestUserURLIsFetchedAndRelayed(t *testing.T) {
+	var gotPath, gotType, gotBody string
+	srv, cfg, _ := tlsUpstream(t, func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotPath, gotType, gotBody = r.URL.RequestURI(), r.Header.Get("Content-Type"), string(b)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"result":"0x1"}`))
+	})
+	h, replies := handler(cfg)
+	sendURL(t, h, srv.URL+"/v3/key?x=1#frag", http.MethodPost, "application/json")
+	r := <-replies
+	body, _ := common.DecompressData(r.Payload)
+	if r.Reason != "" || r.Status != 200 || string(body) != `{"result":"0x1"}` {
+		t.Fatalf("reply = {Reason: %q, Error: %q, Status: %d, body: %q}", r.Reason, r.Error, r.Status, body)
+	}
+	if gotPath != "/v3/key?x=1" || gotType != "application/json" || gotBody != `{"id":1}` {
+		t.Errorf("upstream got %s %q %q", gotPath, gotType, gotBody)
+	}
+}
+
+func TestUserURLRefusals(t *testing.T) {
+	srv, cfg, dialed := tlsUpstream(t, func(w http.ResponseWriter, r *http.Request) {})
+	cases := []struct {
+		name, url, method, ctype, reason string
+		cfg                              *http_proxy.Config
+	}{
+		{"private address", srv.URL, http.MethodPost, "application/json", http_proxy.ReasonExitRefused, &http_proxy.Config{UserURLs: http_proxy.UserURLs{Enable: true}}},
+		{"plain http", "http://" + srv.Listener.Addr().String(), http.MethodPost, "application/json", http_proxy.ReasonExitRefused, cfg},
+		{"credentials", strings.Replace(srv.URL, "https://", "https://u:p@", 1), http.MethodPost, "application/json", http_proxy.ReasonExitRefused, cfg},
+		{"GET", srv.URL, http.MethodGet, "application/json", http_proxy.ReasonExitRefused, cfg},
+		{"not JSON", srv.URL, http.MethodPost, "text/plain", http_proxy.ReasonExitRefused, cfg},
+		{"too long", srv.URL + "/" + strings.Repeat("a", http_proxy.MaxURLLength), http.MethodPost, "application/json", http_proxy.ReasonExitRefused, cfg},
+		{"provider selection off", srv.URL, http.MethodPost, "application/json", http_proxy.ReasonProviderSelectionOff, &http_proxy.Config{Policy: cfg.Policy, Roots: cfg.Roots}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h, replies := handler(c.cfg)
+			sendURL(t, h, c.url, c.method, c.ctype)
+			if r := <-replies; r.Reason != c.reason || r.Error == "" {
+				t.Errorf("reply = {Reason: %q, Error: %q}, want %q", r.Reason, r.Error, c.reason)
+			}
+		})
+	}
+	if *dialed {
+		t.Error("a refused request reached the upstream")
+	}
+}
+
+// Provider selection off never falls back to the [Networks] entry the path names.
+func TestProviderSelectionOffDoesNotFallBack(t *testing.T) {
+	hit := false
+	net := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hit = true }))
+	defer net.Close()
+	h, replies := handler(&http_proxy.Config{Networks: map[string]string{"_/url": net.URL}})
+	sendURL(t, h, "https://rpc.example", http.MethodPost, "application/json")
+	if r := <-replies; r.Reason != http_proxy.ReasonProviderSelectionOff || hit {
+		t.Errorf("reply %q, [Networks] hit: %v", r.Reason, hit)
+	}
+}
+
+func TestUserURLRedirectIsRelayedNotFollowed(t *testing.T) {
+	inner, _, innerDialed := tlsUpstream(t, func(w http.ResponseWriter, r *http.Request) {})
+	srv, cfg, _ := tlsUpstream(t, func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, inner.URL, http.StatusPermanentRedirect)
+	})
+	h, replies := handler(cfg)
+	sendURL(t, h, srv.URL, http.MethodPost, "application/json")
+	if r := <-replies; r.Reason != "" || r.Status != http.StatusPermanentRedirect || r.Header.Get("Location") != "" || *innerDialed {
+		t.Errorf("reply = {Reason: %q, Status: %d, Location: %q}, redirect target dialed: %v", r.Reason, r.Status, r.Header.Get("Location"), *innerDialed)
 	}
 }

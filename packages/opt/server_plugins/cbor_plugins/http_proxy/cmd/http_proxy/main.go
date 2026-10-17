@@ -122,6 +122,7 @@ type proxyRequestHandler struct {
 	log            *logging.Logger
 	maxPayloadSize int
 	networks       *http.Client
+	user           *http.Client
 
 	// slots holds one token per request in flight.
 	slots chan struct{}
@@ -135,6 +136,7 @@ func New(cfg *http_proxy.Config, log *logging.Logger, maxPayloadSize int) *proxy
 		log:            log,
 		maxPayloadSize: maxPayloadSize,
 		networks:       http_proxy.NewNetworksClient(),
+		user:           http_proxy.NewUserClient(cfg.Policy, cfg.Roots),
 		slots:          make(chan struct{}, http_proxy.ExitConcurrency),
 	}
 }
@@ -225,6 +227,10 @@ func (s *proxyRequestHandler) handle(r *cborplugin.Request) error {
 		return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, fmt.Sprintf("validateRequestURL failed: %s", err.Error()))
 	}
 
+	if req.URL != "" {
+		return s.serveUserURL(r, req.URL, request)
+	}
+
 	if match, _ := regexp.MatchString("^/_/probe.*", request.URL.Path); match {
 		segments := strings.Split(request.URL.Path, "/")
 		if len(segments) >= 4 {
@@ -250,6 +256,21 @@ func (s *proxyRequestHandler) handle(r *cborplugin.Request) error {
 	return s.relay(r, s.networks, target, request)
 }
 
+// serveUserURL fetches the upstream the user chose, under the destination
+// policy. Only the URL's host is logged: a provider URL often embeds an API
+// key.
+func (s *proxyRequestHandler) serveUserURL(r *cborplugin.Request, rawURL string, request *http.Request) error {
+	if !s.cfg.UserURLs.Enable {
+		return s.sendError(r.ID, r.SURB, http_proxy.ReasonProviderSelectionOff, "this exit does not serve user-chosen provider URLs")
+	}
+	target, err := http_proxy.CheckUserRequest(rawURL, request.Method, request.Header.Get("Content-Type"))
+	if err != nil {
+		return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, err.Error())
+	}
+	s.log.Infof("request %d: provider host %s", r.ID, target.Host)
+	return s.relay(r, s.user, target.String(), request)
+}
+
 // relay sends the inner request's body and Content-Type to target and
 // answers with the upstream's status, relayed headers and body.
 func (s *proxyRequestHandler) relay(r *cborplugin.Request, client *http.Client, target string, request *http.Request) error {
@@ -269,8 +290,13 @@ func (s *proxyRequestHandler) relay(r *cborplugin.Request, client *http.Client, 
 	newRequest.Header.Set("Content-Type", request.Header.Get("Content-Type"))
 
 	resp, err := client.Do(newRequest)
+	if errors.Is(err, http_proxy.ErrDestinationRefused) {
+		// Refused at dial: nothing went upstream.
+		s.log.Warningf("request %d: %s", r.ID, http_proxy.LogSafe(err))
+		return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, http_proxy.LogSafe(err))
+	}
 	if err != nil {
-		s.log.Errorf("upstream request failed: %s", err)
+		s.log.Errorf("upstream request failed: %s", http_proxy.LogSafe(err))
 		return s.sendError(r.ID, r.SURB, http_proxy.ReasonUpstreamUnreachable, "HTTP request failed")
 	}
 	defer resp.Body.Close()
@@ -280,7 +306,7 @@ func (s *proxyRequestHandler) relay(r *cborplugin.Request, client *http.Client, 
 		return s.sendError(r.ID, r.SURB, http_proxy.ReasonTooLarge, "HTTP response is too big")
 	}
 	if err != nil {
-		s.log.Errorf("reading upstream reply failed: %s", err)
+		s.log.Errorf("reading upstream reply failed: %s", http_proxy.LogSafe(err))
 		return s.sendError(r.ID, r.SURB, http_proxy.ReasonUpstreamUnreachable, "reading the upstream reply failed")
 	}
 

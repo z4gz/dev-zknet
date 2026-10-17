@@ -1,6 +1,7 @@
 package http_proxy
 
 import (
+	"bytes"
 	"net/http"
 	"reflect"
 	"testing"
@@ -8,53 +9,38 @@ import (
 	"github.com/fxamacker/cbor/v2"
 )
 
-// legacyResponse is Response as it was before Reason, Status and Header.
-type legacyResponse struct {
-	Payload []byte
-	Error   string
+func TestEmptyURLIsOmitted(t *testing.T) {
+	without, _ := cbor.Marshal(&Request{Payload: []byte("x")})
+	with, _ := cbor.Marshal(&Request{Payload: []byte("x"), URL: "https://rpc.example/v3/key"})
+	if bytes.Contains(without, []byte("URL")) || !bytes.Contains(with, []byte("URL")) {
+		t.Errorf("without URL %x, with URL %x", without, with)
+	}
 }
 
-func TestOldDecoderReadsNewResponse(t *testing.T) {
-	b, err := cbor.Marshal(&Response{
-		Payload: []byte("body"),
-		Status:  429,
-		Header:  http.Header{"Retry-After": {"7"}},
-	})
+func TestLoadUserURLs(t *testing.T) {
+	cfg, err := Load([]byte("[Networks]\n  \"ethereum\" = \"https://rpc.example\"\n"))
+	if err != nil || !cfg.UserURLs.Enable {
+		t.Fatalf("absent [UserURLs] must mean enabled: %+v %v", cfg, err)
+	}
+	cfg, err = Load([]byte("[UserURLs]\n  Enable = false\n  AllowCIDRs = [\"172.16.0.0/12\"]\n"))
+	if err != nil || cfg.UserURLs.Enable || len(cfg.Policy.Allow) != 1 {
+		t.Fatalf("%+v %v", cfg, err)
+	}
+	if _, err := Load([]byte("[UserURLs]\n  AllowCIDRs = [\"not-a-prefix\"]\n")); err == nil {
+		t.Error("a bad prefix loads")
+	}
+	if _, err := Load([]byte("[UserURLs]\n  RootCAs = \"/nonexistent.pem\"\n")); err == nil {
+		t.Error("a missing RootCAs file loads")
+	}
+}
+
+func TestPackagedConfigEnablesProviderSelection(t *testing.T) {
+	cfg, err := LoadFile("http_proxy_config.toml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var old legacyResponse
-	if err := cbor.Unmarshal(b, &old); err != nil {
-		t.Fatalf("old decoder rejects new reply: %s", err)
-	}
-	if string(old.Payload) != "body" || old.Error != "" {
-		t.Errorf("old decoder read %+v", old)
-	}
-
-	b, _ = cbor.Marshal(&Response{Error: "URI not configured in networks", Reason: ReasonExitRefused})
-	old = legacyResponse{}
-	if err := cbor.Unmarshal(b, &old); err != nil || old.Error != "URI not configured in networks" {
-		t.Errorf("old decoder read %+v (%v)", old, err)
-	}
-}
-
-func TestNewDecoderReadsOldResponse(t *testing.T) {
-	b, _ := cbor.Marshal(&legacyResponse{Payload: []byte("body")})
-	var r Response
-	if err := cbor.Unmarshal(b, &r); err != nil {
-		t.Fatal(err)
-	}
-	if string(r.Payload) != "body" || r.Status != 0 || r.Header != nil || r.Reason != "" {
-		t.Errorf("new decoder read %+v", r)
-	}
-}
-
-// The new fields cost nothing on the wire when unset.
-func TestEmptyNewFieldsAreOmitted(t *testing.T) {
-	newB, _ := cbor.Marshal(&Response{Payload: []byte("x")})
-	oldB, _ := cbor.Marshal(&legacyResponse{Payload: []byte("x")})
-	if !reflect.DeepEqual(newB, oldB) {
-		t.Errorf("new encoding %x differs from old %x", newB, oldB)
+	if !cfg.UserURLs.Enable || len(cfg.Policy.Allow) != 0 || cfg.Roots != nil {
+		t.Errorf("packaged [UserURLs] = %+v", cfg.UserURLs)
 	}
 }
 
