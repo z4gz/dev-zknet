@@ -68,6 +68,11 @@ mount_net_name=-v $(kp_docker_dir)/$(net_name):/$(net_name)
 opt_ldflags="-extldflags=-Wl,-z,stack-size=0x1F40000 -buildid= -X github.com/ZeroKnowledgeNetwork/opt/common.CompressionEnabled=${compression}"
 kp_dir=$(shell readlink -f $(katzenpost_dir))
 kp_docker_dir=$(kp_dir)/docker
+# What our binaries build from: every Go source in this module plus go.mod and
+# go.sum. A change to any of them rebuilds the binaries on the next `start`.
+# Not exported: upstream has no use for it.
+opt_go_sources:=$(shell find .. -name '*.go' -not -path '../docker/*') ../go.mod ../go.sum
+unexport opt_go_sources
 net_dir=$(kp_docker_dir)/$(net_name)
 mount_opt=-v $(shell readlink -f ..):/go/opt
 docker_run_sh=$(docker) run ${docker_args} $(mount_net_name) $(mount_opt) --rm katzenpost-$(distro)_base $(sh) -c
@@ -125,11 +130,17 @@ clone-katzenpost:
 			$(katzenpost_dir); \
 	fi
 
-$(net_dir)/http_proxy.$(distro): $(katzenpost_dir)/docker/$(distro)_base.stamp | $(net_name) $(cache_dir)
+# Sources are plain files: the empty rule keeps the pass-through `%` rule below
+# from treating them as upstream targets.
+opt_config_sources=../server_plugins/cbor_plugins/http_proxy/http_proxy_config.toml
+unexport opt_config_sources
+$(opt_go_sources) $(opt_config_sources): ;
+
+$(net_dir)/http_proxy.$(distro): $(katzenpost_dir)/docker/$(distro)_base.stamp $(opt_go_sources) $(opt_config_sources) | $(net_name) $(cache_dir)
 	$(docker_run_sh) 'cd /go/opt/server_plugins/cbor_plugins/http_proxy/cmd/http_proxy ; go build -trimpath -ldflags ${opt_ldflags} && mv http_proxy /$(net_name)/http_proxy.$(distro)'
 	cp ../server_plugins/cbor_plugins/http_proxy/http_proxy_config.toml $(net_dir)/servicenode1/
 
-$(net_dir)/walletshield.$(distro): $(katzenpost_dir)/docker/$(distro)_base.stamp | $(net_name) $(cache_dir)
+$(net_dir)/walletshield.$(distro): $(katzenpost_dir)/docker/$(distro)_base.stamp $(opt_go_sources) | $(net_name) $(cache_dir)
 	$(docker_run_sh) 'cd /go/opt/apps/walletshield ; go build -trimpath -ldflags ${opt_ldflags} && mv walletshield /$(net_name)/walletshield.$(distro)'
 
 .PHONY: walletshield-probe
