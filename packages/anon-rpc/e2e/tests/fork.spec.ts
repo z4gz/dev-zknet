@@ -100,7 +100,7 @@ test.describe('fork harness: network.policy', () => {
     expect(booted.error).toBeUndefined();
     const call = await page.evaluate((req) => window.e2e.fetch(req), {
       id: 'w',
-      url: '/ethereum-rpc',
+      url: `${walletshield}/ethereum`,
       body: RPC_BODY,
       timeoutMs: 20_000,
     });

@@ -3,7 +3,7 @@
 export interface ErrorInfo {
   name: string;
   message: string;
-  /** The SPEC §12 code, when the harness forwards one. */
+  /** The Anon-RPC SPEC v0.3.2 §12 code, when the harness forwards one. */
   code?: string;
 }
 

@@ -117,10 +117,12 @@ function bootZknet(page: Page) {
   });
 }
 
+// A public provider URL: the worker still contacts only WalletShield, which
+// carries the URL to the exit inside the mixnet.
 function call(page: Page) {
   return page.evaluate((req) => window.e2e.fetch(req), {
     id: 'w',
-    url: '/ethereum-rpc',
+    url: 'https://ethereum-rpc.publicnode.com',
     body: RPC_BODY,
     timeoutMs: 20_000,
   });

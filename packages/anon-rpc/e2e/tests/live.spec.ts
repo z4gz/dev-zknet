@@ -4,23 +4,28 @@
 // starts a mixnet or a WalletShield; start them first (see README § Live tier).
 //
 //   WALLETSHIELD_URL  the WalletShield listener (default http://127.0.0.1:7070)
-//   LIVE_NETWORK      the exit [Networks] key /ethereum-rpc maps to (default "ethereum")
 //   LIVE_TIMEOUT_MS   the worker's per-call deadline (default 60000)
+//   LIVE_RTT_PROBES   exit probes timed for the mix round trip (default 20)
+//   LIVE_EXIT_BED     the dev mix's net directory: also run the refusals that
+//                     need an https stub the exit can reach (src/exit-testbed.ts
+//                     rewrites that exit's config and restarts its service node)
 
 import { expect, test, type Page } from '@playwright/test';
-import type { FetchResult, LogLine } from '../page/api.js';
+import type { FetchResult } from '../page/api.js';
 import { startChain, type Chain } from '../src/chain.js';
+import { PRIVATE_HOST, startExitTestbed, type ExitTestbed } from '../src/exit-testbed.js';
 import { bundlePage, pinnedHarness, servePage, type PageServer } from '../src/page.js';
 import { WORKER_BUNDLE } from '../src/paths.js';
 
 const WALLETSHIELD = process.env.WALLETSHIELD_URL ?? 'http://127.0.0.1:7070';
-const NETWORK = process.env.LIVE_NETWORK ?? 'ethereum';
 const TIMEOUT_MS = Number(process.env.LIVE_TIMEOUT_MS ?? 60_000);
+const RTT_PROBES = Number(process.env.LIVE_RTT_PROBES ?? 20);
+const EXIT_BED = process.env.LIVE_EXIT_BED;
 
-const CALLS = [
-  { method: 'eth_chainId', params: [] },
-  { method: 'eth_blockNumber', params: [] },
-  { method: 'eth_getBalance', params: ['0x0000000000000000000000000000000000000000', 'latest'] },
+// Per chain: the anon-rpc demo's prefilled public provider, and the exit's [Networks] key.
+const CHAINS = [
+  { chain: 'mainnet', provider: 'https://ethereum-rpc.publicnode.com', network: 'ethereum', chainId: '0x1' },
+  { chain: 'sepolia', provider: 'https://ethereum-sepolia-rpc.publicnode.com', network: 'ethereum/sepolia', chainId: '0xaa36a7' },
 ];
 
 let chain: Chain;
@@ -30,22 +35,18 @@ let address: string;
 const say = (line = '') => console.log(line);
 
 test.beforeAll(async () => {
-  say(`live tier: worker → WalletShield ${WALLETSHIELD} → mixnet → exit [Networks] "${NETWORK}"`);
+  say(`live tier: worker → WalletShield ${WALLETSHIELD} → mixnet → exit`);
   // WalletShield answers /_/health itself, without a mixnet round trip.
   try {
     const res = await fetch(`${WALLETSHIELD}/_/health`, { signal: AbortSignal.timeout(5_000) });
     say(`WalletShield /_/health: HTTP ${res.status} ${(await res.text()).trim()}`);
   } catch (e) {
-    throw new Error(
-      `WalletShield is not answering at ${WALLETSHIELD} (${String(e)}). Start it, or set WALLETSHIELD_URL.`,
-    );
+    throw new Error(`WalletShield is not answering at ${WALLETSHIELD} (${String(e)}). Start it, or set WALLETSHIELD_URL.`);
   }
   chain = await startChain(); // a local anvil for the specifier only; the RPC under test is behind the exit
   address = await chain.deploy(WORKER_BUNDLE);
   site = await servePage(await bundlePage(pinnedHarness()));
-  say(
-    `host page ${site.origin}/ (loopback: no Local Network Access prompt), specifier ${address} on ${chain.rpcUrl}`,
-  );
+  say(`host page ${site.origin}/ (loopback: no Local Network Access prompt), specifier ${address} on ${chain.rpcUrl}`);
 });
 
 test.afterAll(async () => {
@@ -53,70 +54,150 @@ test.afterAll(async () => {
   await chain?.stop();
 });
 
-function rpc(page: Page, method: string, params: unknown[]): Promise<FetchResult> {
-  const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method, params });
-  return page.evaluate((req) => window.e2e.fetch(req), {
-    id: 'w',
-    url: '/ethereum-rpc',
-    body,
-    timeoutMs: TIMEOUT_MS + 5_000,
-  });
-}
-
-test('JSON-RPC through a real WalletShield and mixnet', async ({ page }) => {
+async function bootWorker(page: Page): Promise<void> {
   await page.goto(`${site.origin}/`);
   await page.waitForFunction(() => window.e2e !== undefined);
   const booted = await page.evaluate((req) => window.e2e.boot(req), {
     id: 'w',
     address,
     rpcUrl: chain.rpcUrl,
-    config: {
-      walletshield: WALLETSHIELD,
-      network: NETWORK,
-      timeoutMs: TIMEOUT_MS,
-      logLevel: 'debug',
-    },
+    config: { walletshield: WALLETSHIELD, timeoutMs: TIMEOUT_MS },
     readyTimeoutMs: 30_000,
   });
   expect(booted.error).toBeUndefined();
-  say(`worker ready in ${Math.round(booted.readyMs)} ms`);
+}
 
-  const failures: string[] = [];
-  for (const { method, params } of CALLS) {
-    const r = await rpc(page, method, params);
-    if (r.ok) {
-      say(`${method}: HTTP ${r.status} in ${Math.round(r.ms)} ms → ${r.bodyText}`);
-      let parsed: { result?: unknown; error?: unknown } = {};
-      try {
-        parsed = JSON.parse(r.bodyText ?? '');
-      } catch {
-        // reported below
-      }
-      if (r.status !== 200 || parsed.result === undefined)
-        failures.push(`${method}: HTTP ${r.status} ${r.bodyText}`);
-    } else {
-      say(
-        `${method}: FAILED in ${Math.round(r.ms)} ms → ${r.error?.code} / ${r.error?.name}: ${r.error?.message}`,
-      );
-      failures.push(`${method}: ${r.error?.code} / ${r.error?.name}`);
-    }
+function rpc(page: Page, url: string, method = 'eth_chainId'): Promise<FetchResult> {
+  return page.evaluate((req) => window.e2e.fetch(req), {
+    id: 'w',
+    url,
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params: [] }),
+    timeoutMs: TIMEOUT_MS + 5_000,
+  });
+}
+
+function report(label: string, r: FetchResult): void {
+  say(r.ok ? `${label}: HTTP ${r.status} in ${Math.round(r.ms)} ms → ${r.bodyText}` : `${label}: ${r.error?.code} / ${r.error?.name} in ${Math.round(r.ms)} ms: ${r.error?.message}`);
+}
+
+const result = (r: FetchResult) => (JSON.parse(r.bodyText ?? '{}') as { result?: unknown }).result;
+
+/**
+ * The exit answered a probe: it replies with an empty payload, which
+ * WalletShield reports as bad-reply. Only a mix timeout or a refusal before
+ * sending means it did not.
+ */
+const exitAnswered = (res: Response | undefined) =>
+  res !== undefined && !['mix-timeout', 'too-large'].includes(res.headers.get('zknet-error') ?? '');
+
+/** The mix round trip, from WalletShield's exit probe: one mixnet round trip, the exit answers without an upstream. */
+test('mix round-trip time', async () => {
+  const ms: number[] = [];
+  let failed = 0;
+  for (let i = 0; i < RTT_PROBES; i++) {
+    const t = performance.now();
+    const res = await fetch(`${WALLETSHIELD}/_/probe/0`, { method: 'POST', body: '', signal: AbortSignal.timeout(30_000) }).catch(() => undefined);
+    if (exitAnswered(res)) ms.push(performance.now() - t);
+    else failed++;
+    await res?.arrayBuffer();
   }
+  ms.sort((a, b) => a - b);
+  const at = (q: number) => Math.round(ms[Math.min(ms.length - 1, Math.floor(q * ms.length))] ?? NaN);
+  say(`mix RTT over ${ms.length}/${RTT_PROBES} exit probes (${failed} failed): min ${at(0)} · p50 ${at(0.5)} · p90 ${at(0.9)} · max ${at(1)} ms`);
+  say(`budget: WalletShield -timeout 20000 ms − exit upstream timeout 10000 ms = 10000 ms for the mix round trip`);
+  expect(ms.length).toBeGreaterThan(0);
+});
 
-  const logs: LogLine[] = await page.evaluate(() => window.e2e.logs('w', 200, 500));
-  say('\nworker log:');
-  for (const l of logs)
-    say(
-      `  [${l.level}] ${l.args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ')}`,
-    );
+for (const { chain: name, provider, network, chainId } of CHAINS) {
+  test(`${name}: the demo's provider URL and WalletShield's network URL both answer`, async ({ page }) => {
+    await bootWorker(page);
+    const viaProvider = await rpc(page, provider);
+    report(`${name} provider ${provider}`, viaProvider);
+    const viaNetwork = await rpc(page, `${WALLETSHIELD}/${network}`);
+    report(`${name} WalletShield /${network}`, viaNetwork);
+    expect([viaProvider.status, result(viaProvider)]).toEqual([200, chainId]);
+    expect([viaNetwork.status, result(viaNetwork)]).toEqual([200, chainId]);
+  });
+}
 
-  say(`
-What to look at:
-  - eth_chainId must be the chain of the exit's "${NETWORK}" upstream (0x1 mainnet, 0xaa36a7 sepolia).
-  - WalletShield's log: one request per call above, POST /${NETWORK}, and its round-trip time.
-  - The exit (http_proxy) log: the same number of requests, sent to the "${NETWORK}" upstream.
-  - The worker log: a probe after boot whose reach is not "none", then call.done per call.
-  - On failure, the name says where it broke: PeerUnreachable (WalletShield not answering),
-    MixTimeout (no reply over the mixnet in time), ExitRefused (network key not served by the
-    exit), UpstreamUnreachable (exit could not reach the RPC), BadReply / UnexpectedReply.`);
-  expect(failures).toEqual([]);
+test('private provider addresses are refused: literals by the worker, names by the exit after DNS', async ({ page }) => {
+  await bootWorker(page);
+  for (const url of ['https://10.0.0.1/', 'https://127.0.0.1:8545/']) {
+    const r = await rpc(page, url);
+    report(`refusal ${url}`, r);
+    expect({ url, code: r.error?.code, name: r.error?.name }).toEqual({ url, code: 'unsupported', name: 'UnsupportedRequest' });
+  }
+  // A public name that resolves to loopback: only the exit can tell.
+  for (const url of ['https://localtest.me/']) {
+    const r = await rpc(page, url);
+    report(`refusal ${url}`, r);
+    expect({ url, code: r.error?.code, name: r.error?.name }).toEqual({ url, code: 'permission-denied', name: 'ExitRefused' });
+  }
+});
+
+test.describe('against an https stub the exit can reach', () => {
+  test.skip(!EXIT_BED, 'set LIVE_EXIT_BED to the dev mix net directory');
+  let bed: ExitTestbed;
+
+  test.beforeAll(async () => {
+    test.setTimeout(240_000);
+    bed = await startExitTestbed(EXIT_BED);
+    say(`exit test bed: stub at ${bed.origin}; servicenode1 restarted with it allowed`);
+    // Wait for the restarted exit to answer probes again.
+    const until = Date.now() + 180_000;
+    for (;;) {
+      const res = await fetch(`${WALLETSHIELD}/_/probe/0`, { method: 'POST', body: '', signal: AbortSignal.timeout(25_000) }).catch(() => undefined);
+      if (exitAnswered(res)) break;
+      if (Date.now() > until) throw new Error('the exit did not come back after its restart');
+      await new Promise((r) => setTimeout(r, 2_000));
+    }
+  });
+
+  test.afterAll(async () => {
+    await bed?.close();
+  });
+
+  test('the allowed stub answers, so the refusals below are the policy and limits at work', async ({ page }) => {
+    await bootWorker(page);
+    const r = await rpc(page, `${bed.origin}/ok`);
+    report('stub /ok', r);
+    expect([r.status, result(r)]).toEqual([200, '0xstub']);
+  });
+
+  test('a name that resolves to an RFC 1918 address the bed does not allow is refused after DNS', async ({ page }) => {
+    await bootWorker(page);
+    const r = await rpc(page, `https://${PRIVATE_HOST}/`);
+    report(`refusal ${PRIVATE_HOST}`, r);
+    expect({ code: r.error?.code, name: r.error?.name }).toEqual({ code: 'permission-denied', name: 'ExitRefused' });
+  });
+
+  test('a slow provider fails as the upstream, inside the exit timeout, not as a mix timeout', async ({ page }) => {
+    // Expected to fail today. The katzenpost v0.0.107 client keeps a SURB's
+    // reply state for the encoded round trip plus (2·layers+3) × 500 ms, 4.5 s
+    // on a 3-layer mix (client/daemon.go), and discards a later reply. Measured
+    // on the dev mix: an exit-side delay up to 4 s comes back, 5 s or more
+    // never does, so the exit's 10 s upstream timeout reply is lost and the
+    // call reports mix-timeout after WalletShield's 20 s.
+    test.fail(true, 'the exit upstream timeout (10 s) exceeds the client SURB reply retention (about 4.5 s)');
+    await bootWorker(page);
+    const r = await rpc(page, `${bed.origin}/slow`);
+    report('stub /slow', r);
+    expect({ code: r.error?.code, name: r.error?.name }).toEqual({ code: 'network-error', name: 'UpstreamUnreachable' });
+    expect(r.ms).toBeLessThan(20_000);
+  });
+
+  test('an oversized reply is too large', async ({ page }) => {
+    await bootWorker(page);
+    const r = await rpc(page, `${bed.origin}/big`);
+    report('stub /big', r);
+    expect({ code: r.error?.code, name: r.error?.name }).toEqual({ code: 'too-large', name: 'TooLarge' });
+  });
+
+  test('a redirect to a private address is relayed, never followed', async ({ page }) => {
+    await bootWorker(page);
+    const r = await rpc(page, `${bed.origin}/redirect-private`);
+    report('stub /redirect-private', r);
+    expect(r.status).toBe(307);
+    expect(r.headers?.some(([k]) => k === 'location')).toBe(false);
+  });
 });

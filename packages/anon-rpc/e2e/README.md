@@ -7,7 +7,7 @@ headless Chromium (Playwright)
   host page (page/main.ts) with @anon-rpc/browser-harness
     reads a WorkerSpecifier on a local anvil, fetches the bundle from the keccak resolver,
     checks keccak256, boots the worker in the harness's sandboxed frame
-      worker → POST /<network> → WalletShield (a stub here; the real one in the live tier)
+      worker → POST /<network> or POST /_/url → WalletShield (a stub here; the real one in the live tier)
 ```
 
 The specifier, the anvil chain and the resolver come from `@zknet/anon-rpc-specifier`. The
@@ -41,7 +41,11 @@ WalletShield. The spec asserts:
 
 - the page runs exactly the pinned package (the esbuild metafile names its files);
 - the real bundle boots by specifier, in a `sandbox="allow-scripts"` frame;
-- a JSON-RPC read through `/ethereum-rpc` returns 200 and the body, posted to `/<network>`;
+- per chain (mainnet, Sepolia), the demo's public provider URL reaches WalletShield as
+  `POST /_/url` with the URL in `ZKNet-URL`, and WalletShield's own URL for the network key
+  (`<walletshield>/ethereum`, `/ethereum/sepolia`) as `POST /<network>`;
+- the worker refuses a plain-http provider, a local URL that is not the configured WalletShield,
+  a WalletShield path outside the network keys, and GET, before WalletShield sees anything;
 - an upstream 429 reaches the host as a 429 with `retry-after`;
 - every `ZKNet-Error` reason reaches the host as its `code` and `name`, at WalletShield's
   status for it, and an unknown reason as `UnexpectedReply`;
@@ -60,7 +64,7 @@ records every request in two layers (`src/egress-proxy.ts`):
 - **the browser layer**: Playwright's request events, which include the worker's fetches inside
   the sandboxed frame, cover the allowed origins that go direct.
 
-Positive: the real worker, booted and called three times, contacts only the bed (page, specifier
+Positive: the real worker, booted and called three times with a public provider URL, contacts only the bed (page, specifier
 RPC, resolver) and, once ready, only WalletShield. Negative: `fixtures/leaky-worker.js`, a
 hash-pinned worker that fetches another loopback port, a `localhost` alias of WalletShield's port
 and a public host, and opens a WebSocket, is flagged on every count. A trap server confirms that
@@ -115,15 +119,15 @@ What `demo-up` does:
 
 It is idempotent. The specifier is deployed from anvil's account #9, so on a fresh anvil it is
 always `0x700b6A60ce7EaaEA56F065753d8dcB9653dbAD35`; that address is what the `zknet-local`
-preset below names. `DEMO_WALLETSHIELD` and `DEMO_NETWORK` change the printed worker config.
+preset below names. `DEMO_WALLETSHIELD` changes the printed worker config.
 
 | Demo field    | Value                                                                                                                                            |
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Worker        | "ZKNet (local anvil)" on the `zknet/local-dev` site, or "Custom" with the address below                                                          |
 | Specifier     | `0x700b6A60ce7EaaEA56F065753d8dcB9653dbAD35`                                                                                                     |
 | Bootstrap     | `http://127.0.0.1:8545` (chain 31337)                                                                                                            |
-| Worker RPC    | `http://zknet.invalid/ethereum-rpc`: any http(s) URL whose path is `/ethereum-rpc`; the worker matches the path only and never contacts the host |
-| Worker config | `{"walletshield":"http://127.0.0.1:7070","network":"ethereum"}`; `network` is a key of the exit's `[Networks]`                                   |
+| Worker RPC    | the prefilled public provider (e.g. `https://ethereum-rpc.publicnode.com`), fetched by the exit; or `http://127.0.0.1:7070/ethereum` (`/ethereum/sepolia`) for the exit operator's provider |
+| Worker config | `{"walletshield":"http://127.0.0.1:7070"}`                                                                                                                                                   |
 
 The site comes from the anon-rpc fork's dev-only branch `zknet/local-dev`. It adds chain 31337
 and the `zknet-local` preset, which also carries `network.policy`. Build and serve it locally:
@@ -157,28 +161,44 @@ The fix is on the fork's `fix/demo-local-file`.
 For a human with a running ZKNet dev mixnet. Nothing here starts one.
 
 1. Start the mixnet and a WalletShield as usual (root README, _Run the local mixnet_ and _Run the
-   clients locally_), and note WalletShield's `-listen` address.
+   clients locally_), and note WalletShield's `-listen` address. The exit must be built from
+   this tree: `docker/Makefile` builds `http_proxy.alpine` and `walletshield.alpine` only when
+   they are missing from the net directory.
 2. Run:
 
    ```sh
-   WALLETSHIELD_URL=http://127.0.0.1:7070 LIVE_NETWORK=ethereum nx run @zknet/anon-rpc-e2e:live
+   WALLETSHIELD_URL=http://127.0.0.1:7070 nx run @zknet/anon-rpc-e2e:live
    ```
 
-   `LIVE_NETWORK` is the exit's `[Networks]` key that `/ethereum-rpc` maps to (e.g.
-   `ethereum/sepolia`); `LIVE_TIMEOUT_MS` is the worker's per-call deadline (default 60000). Add
-   `-- --headed` to watch the browser.
+   `LIVE_TIMEOUT_MS` is the worker's per-call deadline (default 60000), `LIVE_RTT_PROBES` the
+   number of timed exit probes (default 20). Add `-- --headed` to watch the browser.
 
-3. It checks `/_/health` first, then boots the real bundle (local anvil for the specifier only),
-   sends `eth_chainId`, `eth_blockNumber` and `eth_getBalance` through the worker, and prints each
-   result, the worker's log, and what to look at:
-   - `eth_chainId` matches the exit's upstream for that network (`0x1` mainnet, `0xaa36a7`
-     Sepolia);
-   - WalletShield's log shows one `POST /<network>` per call;
-   - the exit's `http_proxy` log shows the same requests going upstream;
-   - on failure, the error name says where it broke: `PeerUnreachable`, `MixTimeout`,
-     `ExitRefused`, `UpstreamUnreachable`, `BadReply`, or `UnexpectedReply`.
+3. It checks `/_/health` first, then boots the real bundle (local anvil for the specifier only)
+   and prints each result:
+   - **mix round-trip time**: min, p50, p90 and max over the exit probes, against the 10 s the
+     exit's 10 s upstream timeout leaves inside WalletShield's 20 s;
+   - **per chain**, `eth_chainId` through the demo's public provider URL and through
+     WalletShield's network URL: both must be `0x1` (mainnet) or `0xaa36a7` (Sepolia);
+   - **private provider addresses**: the literals `https://10.0.0.1/` and
+     `https://127.0.0.1:8545/` are refused by the worker (`UnsupportedRequest`); a public name
+     that resolves to loopback (`localtest.me`) reaches the exit and fails there, after DNS, as
+     `ExitRefused`.
 
-The test fails unless every call returns HTTP 200 with a JSON-RPC `result`.
+   With `LIVE_EXIT_BED=/tmp/katzenpost.opt/docker/mixnet-alpine` (the dev mix's net directory)
+   it also starts an https stub on the compose network's gateway, sets the exit's test-bed
+   `[UserURLs] AllowCIDRs` and `RootCAs` to allow exactly that stub, restarts the service node,
+   and names the stub in the exit container's `/etc/hosts` (`stub.exit-testbed.test`; the worker
+   refuses private literals, and resolvers commonly drop wildcard-DNS private answers). It
+   checks: the stub answers; `rfc1918.exit-testbed.test`, which resolves to `10.0.0.1`, is
+   `ExitRefused` after DNS; a 15 s reply fails as `UpstreamUnreachable` in under 20 s (the
+   exit's timeout, not a mix timeout) — marked as an expected failure for now: the katzenpost
+   client discards a reply that comes later than the encoded round trip plus 4.5 s, so the
+   exit's 10 s timeout reply is lost and the call reports `MixTimeout`; a 2 MiB reply is `TooLarge`; a 307 to a private address
+   is relayed as 307 and never followed. It restores the packaged config and restarts the
+   service node again afterwards. Use it only on a disposable dev mix.
+
+On failure, the error name says where it broke: `PeerUnreachable`, `MixTimeout`, `ExitRefused`,
+`ExitBusy`, `UpstreamUnreachable`, `BadReply`, or `UnexpectedReply`.
 
 ## Layout
 
@@ -188,6 +208,7 @@ src/chain.ts                anvil, keccak resolver and specifier deploys (specif
 src/page.ts                 page bundle (esbuild, harness alias) and http/https server
 src/egress-proxy.ts         the egress check's proxy and violation filter
 src/fork.ts                 fork harness build, TLS, public profile with seeded grants, LAN stub
+src/exit-testbed.ts         the live tier's https stub and exit test-bed config
 fixtures/leaky-worker.js    the egress check's negative control
 tests/*.spec.ts             one file per tier
 ```

@@ -74,7 +74,6 @@ test.afterAll(async () => {
 
 test.beforeEach(() => {
   stub.requests.length = 0;
-  stub.health = true;
   stub.upstream = () => ({
     status: 200,
     headers: { 'content-type': 'application/json' },
@@ -97,14 +96,22 @@ function boot(page: Page, config: unknown, at = address): Promise<BootResult> {
   });
 }
 
-function rpc(page: Page, url = '/ethereum-rpc'): Promise<FetchResult> {
+/** One JSON-RPC call; by default to WalletShield's own URL for the mainnet key. */
+function rpc(page: Page, url = `${stub.url}/ethereum`, method = 'POST'): Promise<FetchResult> {
   return page.evaluate((req) => window.e2e.fetch(req), {
     id: 'w',
     url,
-    body: RPC_BODY,
+    method,
+    body: method === 'GET' ? undefined : RPC_BODY,
     timeoutMs: 20_000,
   });
 }
+
+// Per chain: the demo's prefilled public provider and WalletShield's network key.
+const CHAINS = [
+  { chain: 'mainnet', provider: 'https://ethereum-rpc.publicnode.com', network: 'ethereum' },
+  { chain: 'sepolia', provider: 'https://ethereum-sepolia-rpc.publicnode.com', network: 'ethereum/sepolia' },
+];
 
 const header = (r: FetchResult, name: string) => r.headers?.find(([k]) => k === name)?.[1];
 
@@ -132,16 +139,51 @@ test('boots the real worker bundle by specifier, in the sandbox', async ({ page 
   expect(booted.allow).toBeNull(); // the published harness delegates nothing
 });
 
-test('a JSON-RPC read through /ethereum-rpc returns 200 and the body', async ({ page }) => {
+for (const { chain: name, provider, network } of CHAINS) {
+  test(`${name}: a provider URL reaches WalletShield as POST /_/url with ZKNet-URL`, async ({ page }) => {
+    await open(page);
+    expect((await boot(page, { walletshield: stub.url })).ok).toBe(true);
+    const r = await rpc(page, provider);
+    expect(r.error).toBeUndefined();
+    expect(r.status).toBe(200);
+    expect(JSON.parse(r.bodyText ?? '')).toEqual({ jsonrpc: '2.0', id: 1, result: '0x10' });
+    const posts = stub.requests.filter((q) => q.method === 'POST');
+    // The worker forwards the URL as parsed: the bare origin gains its "/" path.
+    expect(posts.map((q) => [q.path, q.headers['zknet-url']])).toEqual([['/_/url', new URL(provider).href]]);
+    expect(Buffer.from(posts[0]!.body).toString()).toBe(RPC_BODY);
+  });
+
+  test(`${name}: WalletShield's own URL reaches it as POST /${network}`, async ({ page }) => {
+    await open(page);
+    expect((await boot(page, { walletshield: stub.url })).ok).toBe(true);
+    const r = await rpc(page, `${stub.url}/${network}`);
+    expect(r.error).toBeUndefined();
+    expect(r.status).toBe(200);
+    const posts = stub.requests.filter((q) => q.method === 'POST');
+    expect(posts.map((q) => [q.path, q.headers['zknet-url']])).toEqual([[`/${network}`, undefined]]);
+  });
+}
+
+test('the worker refuses what it does not serve, before WalletShield sees it', async ({ page }) => {
   await open(page);
-  expect((await boot(page, { walletshield: stub.url, network: 'ethereum/sepolia' })).ok).toBe(true);
-  const r = await rpc(page);
-  expect(r.error).toBeUndefined();
-  expect(r.status).toBe(200);
-  expect(JSON.parse(r.bodyText ?? '')).toEqual({ jsonrpc: '2.0', id: 1, result: '0x10' });
-  const posts = stub.requests.filter((q) => q.method === 'POST');
-  expect(posts.map((q) => q.path)).toEqual(['/ethereum/sepolia']);
-  expect(Buffer.from(posts[0]!.body).toString()).toBe(RPC_BODY);
+  expect((await boot(page, { walletshield: stub.url })).ok).toBe(true);
+  const port = new URL(stub.url).port;
+  const refused: [url: string, method?: string][] = [
+    ['http://ethereum-rpc.publicnode.com'], // a plain-http provider
+    [`http://localhost:${port}/ethereum`], // local, but not the configured WalletShield origin
+    [`${stub.url}/_/url`], // WalletShield's own namespace, not a network key
+    ['https://ethereum-rpc.publicnode.com', 'GET'],
+  ];
+  for (const [url, method] of refused) {
+    const r = await rpc(page, url, method);
+    expect({ url, method, code: r.error?.code, name: r.error?.name }).toEqual({
+      url,
+      method,
+      code: 'unsupported',
+      name: 'UnsupportedRequest',
+    });
+  }
+  expect(stub.requests.filter((q) => q.method === 'POST')).toEqual([]);
 });
 
 test('an upstream 429 reaches the host as a 429 with retry-after', async ({ page }) => {
@@ -166,6 +208,8 @@ const REASONS: [reason: string, status: number, code: string, name: string][] = 
   ['upstream-unreachable', 502, 'network-error', 'UpstreamUnreachable'],
   ['too-large', 413, 'too-large', 'TooLarge'],
   ['bad-reply', 502, 'protocol-error', 'BadReply'],
+  ['exit-busy', 503, 'queue-full', 'ExitBusy'],
+  ['provider-selection-off', 502, 'permission-denied', 'ExitRefused'],
   ['some-future-reason', 502, 'protocol-error', 'UnexpectedReply'],
 ];
 
@@ -185,7 +229,7 @@ test('with no WalletShield listening, a call fails as PeerUnreachable', async ({
   await open(page);
   // Not a signalFailed: the worker becomes ready, since WalletShield may start later.
   expect((await boot(page, { walletshield: `http://127.0.0.1:${closed}` })).ok).toBe(true);
-  const r = await rpc(page);
+  const r = await rpc(page, `http://127.0.0.1:${closed}/ethereum`);
   expect(r.ok).toBe(false);
   expect({ code: r.error?.code, name: r.error?.name }).toEqual({
     code: 'network-error',

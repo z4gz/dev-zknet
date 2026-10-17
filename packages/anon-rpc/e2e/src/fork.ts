@@ -42,8 +42,8 @@ export function buildForkHarness(repo: string): ForkHarness {
   return { file: join(dir, 'dist/host.js'), label: `fork:${revision}`, revision };
 }
 
-/** A throwaway self-signed certificate for 127.0.0.1. */
-export function selfSigned(): { key: string; cert: string } {
+/** A throwaway self-signed certificate for one IP address, and optionally one DNS name. */
+export function selfSigned(ip = '127.0.0.1', dnsName?: string): { key: string; cert: string } {
   mkdirSync(RUN_DIR, { recursive: true });
   const dir = mkdtempSync(join(RUN_DIR, 'tls-'));
   try {
@@ -60,9 +60,9 @@ export function selfSigned(): { key: string; cert: string } {
         '-days',
         '1',
         '-subj',
-        '/CN=127.0.0.1',
+        `/CN=${dnsName ?? ip}`,
         '-addext',
-        'subjectAltName=IP:127.0.0.1',
+        `subjectAltName=IP:${ip}${dnsName ? `,DNS:${dnsName}` : ''}`,
         '-keyout',
         join(dir, 'key.pem'),
         '-out',
