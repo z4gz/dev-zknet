@@ -753,7 +753,7 @@ func (s *state) sendCommandToPeer(peer *config.Authority, cmd commands.Command) 
 		}
 		defaultDialer := &net.Dialer{}
 		ctx, cancelFn := context.WithCancel(context.Background())
-		conn, err = common.DialURL(u, ctx, defaultDialer.DialContext)
+		conn, err = common.DialURL(u, ctx, defaultDialer.DialContext, peer.QUICKeyHash, nil)
 		cancelFn()
 		if err == nil {
 			defer conn.Close()

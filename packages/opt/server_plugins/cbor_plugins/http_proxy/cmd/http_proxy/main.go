@@ -26,10 +26,13 @@ import (
 	"github.com/ZeroKnowledgeNetwork/opt/server_plugins/cbor_plugins/http_proxy"
 )
 
-// Note: UserForwardPayloadLength should match the same value passed to genconfig.
-// MaxPayloadSize is set here as an approximation while a better solution is developed to inform the plugin of the Sphinx Geometry.
-const UserForwardPayloadLength = 30000
-const MaxPayloadSize = UserForwardPayloadLength - 20
+// DefaultUserForwardPayloadLength is used when the mix server does not give
+// the plugin its Sphinx geometry (plugin protocol 1); it should then match
+// the value passed to genconfig.
+const DefaultUserForwardPayloadLength = 30000
+
+// payloadMargin is kept free of the UserForwardPayloadLength in each reply.
+const payloadMargin = 20
 
 func main() {
 	var logLevel string
@@ -77,15 +80,28 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	socketFile := filepath.Join(tmpDir, fmt.Sprintf("%d.http_proxy.socket", os.Getpid()))
+	socketFile, fromHost := cborplugin.HostSocketPath(filepath.Join(tmpDir, fmt.Sprintf("%d.http_proxy.socket", os.Getpid())))
+
+	host, err := cborplugin.HostInfo()
+	if err != nil {
+		panic(err)
+	}
+	payloadLength := DefaultUserForwardPayloadLength
+	if host.UserForwardPayloadLength > 0 {
+		payloadLength = host.UserForwardPayloadLength
+	}
+	serverLog.Noticef("UserForwardPayloadLength %d (from mix server: %v)", payloadLength, host.UserForwardPayloadLength > 0)
 
 	var server *cborplugin.Server
 
-	h := New(cfg, serverLog)
+	h := New(cfg, serverLog, payloadLength-payloadMargin)
 	server = cborplugin.NewServer(serverLog, socketFile, new(cborplugin.RequestFactory), h)
 
-	// emit socketFile to stdout, because this tells the mix server where to connect
-	fmt.Printf("%s\n", socketFile)
+	// a mix server speaking plugin protocol 2 gave us the socket path;
+	// otherwise emit it to stdout, which tells the mix server where to connect
+	if !fromHost {
+		fmt.Printf("%s\n", socketFile)
+	}
 
 	server.Accept()
 	server.Wait()
@@ -101,16 +117,18 @@ func validateRequestURL(uri string) error {
 }
 
 type proxyRequestHandler struct {
-	cfg *http_proxy.Config
-	log *logging.Logger
+	cfg            *http_proxy.Config
+	log            *logging.Logger
+	maxPayloadSize int
 
 	write func(cborplugin.Command)
 }
 
-func New(cfg *http_proxy.Config, log *logging.Logger) *proxyRequestHandler {
+func New(cfg *http_proxy.Config, log *logging.Logger, maxPayloadSize int) *proxyRequestHandler {
 	return &proxyRequestHandler{
-		cfg: cfg,
-		log: log,
+		cfg:            cfg,
+		log:            log,
+		maxPayloadSize: maxPayloadSize,
 	}
 }
 
@@ -121,6 +139,13 @@ func (s *proxyRequestHandler) OnCommand(cmd cborplugin.Command) error {
 
 	switch r := cmd.(type) {
 	case *cborplugin.Request:
+		// plugin protocol 2: the mix server asks for parameters to publish
+		// in its descriptor; we have none
+		if r.IsParametersRequest {
+			go s.write(cborplugin.NewParametersResponse(nil))
+			return nil
+		}
+
 		if r.SURB == nil {
 			errMsg := "no SURB, cannot reply"
 			s.log.Error(errMsg)
@@ -223,7 +248,7 @@ func (s *proxyRequestHandler) OnCommand(cmd cborplugin.Command) error {
 			s.log.Errorf("cbor.Marshal(response) failed: %s", err)
 			return s.sendError(r.ID, r.SURB, http_proxy.ReasonUpstreamUnreachable, "Error marshaling response")
 		}
-		if len(payload) > MaxPayloadSize {
+		if len(payload) > s.maxPayloadSize {
 			s.log.Error("HTTP response exceeds max Sphinx payload")
 			return s.sendError(r.ID, r.SURB, http_proxy.ReasonTooLarge, "HTTP response is too big")
 		}

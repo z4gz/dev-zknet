@@ -15,7 +15,7 @@ ARG ENABLE_COMPRESSION=false
 ARG KATZENPOST_DIR=/src/katzenpost
 # must satisfy the `go` directive of both go.mod files (this repo's is the
 # higher of the two), otherwise the toolchain is downloaded at build time
-ARG VERSION_GO=1.26.8
+ARG VERSION_GO=1.26.9
 
 ENV GOROOT=/usr/local/go
 ENV PATH=$GOROOT/bin:$PATH

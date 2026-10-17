@@ -2,7 +2,7 @@
 
 Runbook for moving `packages/opt` to a new upstream
 [katzenpost](https://github.com/katzenpost/katzenpost) tag. Commits that are good
-models: `chore: upgrade katzenpost to v0.0.104` and `... v0.0.105`
+models: `chore: upgrade katzenpost to v0.0.104`, `... v0.0.105` and `... v0.0.107`
 (`git log --grep 'upgrade katzenpost'`).
 
 ## Scope
@@ -47,8 +47,10 @@ go mod tidy
 - Keep `hpqc` and `quic-go` at upstream's versions: their APIs are coupled to
   katzenpost.
 - Other direct deps may be bumped, but check that it still builds.
-  `charmbracelet/log` v0.4.1+ pulls a `charmbracelet/x/cellbuf` that does not
-  compile against the `x/ansi` katzenpost pins (as of v0.0.105), so it stays at v0.4.0.
+  `charmbracelet/log` v0.4.1+ (v1.0.0 included) pulls a `charmbracelet/x/cellbuf`
+  that does not compile against the `x/ansi` katzenpost pins (as of v0.0.107), so
+  it stays at v0.4.0. Trying it bumps `lipgloss` and `termenv`; downgrading `log`
+  alone leaves them bumped and still broken, so pin all three back.
 - When the `go` directive changes, also update `ARG VERSION_GO` in
   `docker/node/Dockerfile` and `go-version` in `.github/workflows/go.yml`.
 
@@ -92,6 +94,26 @@ pnpm nx run mixnet:stop
 ```
 
 ## Notable changes by version
+
+### v0.0.107
+
+- Go 1.26.9. hpqc is now 0.0.93, quic-go 0.63.0.
+- CBOR plugin protocol 2: the mix server offers the plugin a socket path
+  (`cborplugin.HostSocketPath`) and the Sphinx geometry (`cborplugin.HostInfo`),
+  and sends a `Request{IsParametersRequest: true}`. `http_proxy` speaks it: it
+  prints its socket path only under protocol 1, takes `UserForwardPayloadLength`
+  from the host (logged at start, falling back to 30000), and answers the
+  parameters request with an empty `NewParametersResponse`. In servicenode1's
+  `katzenpost.log` the plugin socket path is `/tmp/kpplugin*/plugin.socket`.
+- `quic/common.DialURL` takes the peer's QUIC key hashes and `*Options` (nil is
+  fine), which legacy `pki` passes through from `QUICKeyHash`.
+- QUIC links are now TLS-pinned (`[QUIC]` tables, `QUICKeyHash`,
+  `InternalTransports`; see upstream `CONFIG_CHANGES.md`). Upstream genconfig
+  writes them; the docker default is still `TRANSPORT=TCP`.
+- Upstream's `ldflags` now stamps `common.BuildVersion`. The wrapper no longer
+  overrides `ldflags`; our binaries build with the local `opt_ldflags`.
+- Upstream docker defaults: `wirekem=KYBER768-X25519`, new `pkiScheme`,
+  `contactInfo`, `softwareVersion`, and `check-running-transport` target.
 
 ### v0.0.105
 

@@ -9,7 +9,7 @@
 #   mirrored      - plumbing upstream also defines, duplicated only because
 #                   this Makefile's own recipes need the value. Re-check these
 #                   against $(katzenpost_dir)/docker/Makefile on every
-#                   katzenpost upgrade. Currently mirrored from v0.0.105.
+#                   katzenpost upgrade. Currently mirrored from v0.0.107.
 # Everything else (decoy toggles, epoch_duration, TRANSPORT, log_level,
 # base_port, ...) is inherited from upstream.
 
@@ -43,8 +43,6 @@ docker?=$(shell command -v podman >/dev/null 2>&1 && echo podman || echo docker)
 uid?=$(shell [ "$$SUDO_UID" != "" ] && echo "$$SUDO_UID" || id -u)
 gid?=$(shell [ "$$SUDO_GID" != "" ] && echo "$$SUDO_GID" || id -g)
 docker_user?=$(shell if echo ${docker}|grep -q podman; then echo 0:0; else echo ${uid}:${gid}; fi)
-# upstream's ldflags, plus the local compression flag
-ldflags="-extldflags=-Wl,-z,stack-size=0x1F40000 -buildid= -X github.com/ZeroKnowledgeNetwork/opt/common.CompressionEnabled=${compression}"
 
 # upstream's docker_args, rooted at $(katzenpost_dir) instead of the relative
 # `..`/`.` that only resolve correctly from katzenpost/docker, plus:
@@ -65,6 +63,9 @@ docker_args=--user ${docker_user} --volume $(kp_dir):/go/katzenpost --workdir /g
 mount_net_name=-v $(kp_docker_dir)/$(net_name):/$(net_name)
 
 ### local
+# ldflags for our binaries: upstream's ldflags_body plus the compression flag.
+# Not named ldflags, which would override upstream's (and its BuildVersion stamp).
+opt_ldflags="-extldflags=-Wl,-z,stack-size=0x1F40000 -buildid= -X github.com/ZeroKnowledgeNetwork/opt/common.CompressionEnabled=${compression}"
 kp_dir=$(shell readlink -f $(katzenpost_dir))
 kp_docker_dir=$(kp_dir)/docker
 net_dir=$(kp_docker_dir)/$(net_name)
@@ -125,11 +126,11 @@ clone-katzenpost:
 	fi
 
 $(net_dir)/http_proxy.$(distro): $(katzenpost_dir)/docker/$(distro)_base.stamp | $(net_name) $(cache_dir)
-	$(docker_run_sh) 'cd /go/opt/server_plugins/cbor_plugins/http_proxy/cmd/http_proxy ; go build -trimpath -ldflags ${ldflags} && mv http_proxy /$(net_name)/http_proxy.$(distro)'
+	$(docker_run_sh) 'cd /go/opt/server_plugins/cbor_plugins/http_proxy/cmd/http_proxy ; go build -trimpath -ldflags ${opt_ldflags} && mv http_proxy /$(net_name)/http_proxy.$(distro)'
 	cp ../server_plugins/cbor_plugins/http_proxy/http_proxy_config.toml $(net_dir)/servicenode1/
 
 $(net_dir)/walletshield.$(distro): $(katzenpost_dir)/docker/$(distro)_base.stamp | $(net_name) $(cache_dir)
-	$(docker_run_sh) 'cd /go/opt/apps/walletshield ; go build -trimpath -ldflags ${ldflags} && mv walletshield /$(net_name)/walletshield.$(distro)'
+	$(docker_run_sh) 'cd /go/opt/apps/walletshield ; go build -trimpath -ldflags ${opt_ldflags} && mv walletshield /$(net_name)/walletshield.$(distro)'
 
 .PHONY: walletshield-probe
 walletshield-probe: $(net_dir)/walletshield.$(distro) $(net_dir)/running.stamp | $(cache_dir)

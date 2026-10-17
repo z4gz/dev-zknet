@@ -1,6 +1,6 @@
 module github.com/ZeroKnowledgeNetwork/opt
 
-go 1.26.8
+go 1.26.9
 
 require (
 	github.com/BurntSushi/toml v1.6.0
@@ -8,9 +8,9 @@ require (
 	github.com/carlmjohnson/versioninfo v0.22.5
 	github.com/charmbracelet/log v0.4.0
 	github.com/fxamacker/cbor/v2 v2.9.6
-	github.com/katzenpost/hpqc v0.0.91
-	github.com/katzenpost/katzenpost v0.0.105
-	github.com/quic-go/quic-go v0.59.1
+	github.com/katzenpost/hpqc v0.0.93
+	github.com/katzenpost/katzenpost v0.0.107
+	github.com/quic-go/quic-go v0.63.0
 	github.com/stretchr/testify v1.12.1
 	go.etcd.io/bbolt v1.5.0
 	golang.org/x/crypto v0.58.0
@@ -20,7 +20,7 @@ require (
 
 require (
 	charm.land/lipgloss/v2 v2.0.2 // indirect
-	codeberg.org/vula/highctidh v1.0.2025051200 // indirect
+	codeberg.org/vula/highctidh v1.0.2026101300 // indirect
 	filippo.io/edwards25519 v1.2.0 // indirect
 	filippo.io/mldsa v0.0.0-20260215214346-43d0283efc3e // indirect
 	filippo.io/mlkem768 v0.0.0-20260214141301-2e7bebc7d88d // indirect
@@ -71,7 +71,6 @@ require (
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.67.5 // indirect
 	github.com/prometheus/procfs v0.20.1 // indirect
-	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/rfjakob/eme v1.2.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/shurlinet/go-hqc v0.1.1 // indirect
@@ -85,7 +84,7 @@ require (
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/exp v0.0.0-20240904232852-e7e105dedf7e // indirect
-	golang.org/x/net v0.60.0 // indirect
+	golang.org/x/net v0.61.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.43.0 // indirect

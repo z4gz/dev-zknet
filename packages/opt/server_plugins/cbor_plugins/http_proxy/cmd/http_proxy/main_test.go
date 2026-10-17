@@ -33,7 +33,7 @@ func roundTrip(t *testing.T, networks map[string]string, path string) []byte {
 	}
 	payload, _ := cbor.Marshal(&http_proxy.Request{Payload: compressed})
 
-	h := New(&http_proxy.Config{Networks: networks}, logging.MustGetLogger("test"))
+	h := New(&http_proxy.Config{Networks: networks}, logging.MustGetLogger("test"), DefaultUserForwardPayloadLength-payloadMargin)
 	replies := make(chan []byte, 1)
 	h.write = func(cmd cborplugin.Command) { replies <- cmd.(*cborplugin.Response).Payload }
 	h.OnCommand(&cborplugin.Request{ID: 1, SURB: []byte("surb"), Payload: payload})
@@ -89,7 +89,7 @@ func TestExitFailuresCarryReasons(t *testing.T) {
 	closed := httptest.NewServer(http.NotFoundHandler())
 	closed.Close()
 
-	big := make([]byte, 2*UserForwardPayloadLength)
+	big := make([]byte, 2*DefaultUserForwardPayloadLength)
 	rand.Read(big) // incompressible
 	huge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(big) }))
 	defer huge.Close()
@@ -116,5 +116,24 @@ func TestExitFailuresCarryReasons(t *testing.T) {
 func TestProbeReplyIsUnchanged(t *testing.T) {
 	if p := roundTrip(t, nil, "/_/probe"); p != nil {
 		t.Errorf("probe reply = %x, want nil", p)
+	}
+}
+
+// Plugin protocol 2: a parameters request gets a parameters response, not an
+// error reply for the missing SURB.
+func TestParametersRequestIsAnswered(t *testing.T) {
+	h := New(&http_proxy.Config{}, logging.MustGetLogger("test"), DefaultUserForwardPayloadLength-payloadMargin)
+	replies := make(chan *cborplugin.Response, 1)
+	h.write = func(cmd cborplugin.Command) { replies <- cmd.(*cborplugin.Response) }
+	if err := h.OnCommand(cborplugin.NewParametersRequest()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case r := <-replies:
+		if !r.IsParametersResponse || r.SURB != nil || r.Payload != nil {
+			t.Errorf("reply = %+v, want an empty parameters response", r)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no reply")
 	}
 }
