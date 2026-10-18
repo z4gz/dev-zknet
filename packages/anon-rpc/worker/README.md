@@ -24,9 +24,10 @@ anon-rpc demo's *Worker RPC URL*) chooses:
 
 What ZKNet offers is **RPC provider selection, not general web access**:
 only JSON-RPC `POST` is served. A provider URL may carry an API key; it
-travels to the exit inside the mixnet, never in a request line, and no log
-on the way records more than its host. The exit can see it, as any provider
-URL's first hop can.
+never appears in a request line, and no log on the way records more than its
+host, except WalletShield's own DEBUG log on your machine. The URL, key
+included, is encrypted across the mixnet and visible to the exit operator who
+fetches it.
 
 ```sh
 pnpm nx build @zknet/anon-rpc-worker   # → dist/zknet-anon-rpc-worker.js, prints its keccak256
