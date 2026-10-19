@@ -13,8 +13,10 @@ import (
 
 // Request is the type which is serialized into the cborplugin request payload.
 type Request struct {
-	// Payload contains the proxied http request (origin-form, compressed).
-	// The exit forwards its body and Content-Type.
+	// Payload is the inner request, compressed: the HTTP/1.1 request that
+	// NewInnerRequest writes and ReadInnerRequest reads. It is built afresh
+	// from method, path, Content-Type and body; the caller's own headers never
+	// cross the mixnet. The exit forwards its body and Content-Type.
 	Payload []byte
 
 	// URL, when set, is the upstream the user chose: provider selection,
