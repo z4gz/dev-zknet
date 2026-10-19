@@ -194,3 +194,8 @@ the current Nx project graph and voting-mixnet development path. The
 `docker/node/` and `docker/qemu-runner/` directories have no Nx targets here.
 `packages/opt/tests/` holds the RPC fixtures used by `mixnet:e2e-rpc` and
 `mixnet:e2e-rpc-matrix`; a separate project is unnecessary for those scripts.
+
+## License
+
+`AGPL-3.0-only` by default, with `packages/anon-rpc/` under MIT. See
+[`LICENSING.md`](LICENSING.md) for the path map and where each license text lives.

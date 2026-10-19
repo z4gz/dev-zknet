@@ -2,7 +2,7 @@
   "name": "@zknet/source",
   "version": "0.0.0",
   "private": true,
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "scripts": {},
   "devDependencies": {
     "@noble/hashes": "2.4.0",

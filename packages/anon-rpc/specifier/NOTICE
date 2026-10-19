@@ -1,7 +1,7 @@
 @zknet/anon-rpc-specifier — worker specifier for the ZKNet anon-rpc worker
 
-This directory is licensed under the MIT License (the license this repository
-declares in its package.json), and includes the files listed below, which come from ethereum/anon-rpc
+This directory is licensed under the MIT License (see packages/anon-rpc/LICENSE),
+and includes the files listed below, which come from ethereum/anon-rpc
 (https://github.com/ethereum/anon-rpc) at commit
 31f37d5d79fb80dbb88c34c1aaabd4f25606494b (main, 2026-10-14) and remain under
 the MIT License reproduced at the end of this notice. Each file is a copy, byte

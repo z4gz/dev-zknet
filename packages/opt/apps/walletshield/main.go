@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: © 2023 David Stainton
+// SPDX-FileCopyrightText: © 2024 the ZKNetwork authors
 // SPDX-License-Identifier: AGPL-3.0-only
 
 package main
