@@ -25,11 +25,8 @@ import (
 // returns the raw reply payload it writes back.
 func roundTrip(t *testing.T, networks map[string]string, path string) []byte {
 	t.Helper()
-	req, _ := http.NewRequest(http.MethodPost, "http://nowhere"+path, strings.NewReader(`{"id":1}`))
-	req.Header.Set("Content-Type", "application/json")
-	buf := new(bytes.Buffer)
-	req.Write(buf)
-	compressed, err := common.CompressData(buf.Bytes())
+	inner, _ := http_proxy.NewInnerRequest(http.MethodPost, path, "application/json", []byte(`{"id":1}`))
+	compressed, err := common.CompressData(inner)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,9 +175,25 @@ func rawRoundTrip(t *testing.T, cfg *http_proxy.Config, raw string) *http_proxy.
 
 // An absolute-form request line with no path once crashed the plugin.
 func TestEmptyPathIsRefusedNotAPanic(t *testing.T) {
-	r := rawRoundTrip(t, &http_proxy.Config{}, "POST https://x HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n")
+	r := rawRoundTrip(t, &http_proxy.Config{}, "POST https://x HTTP/1.1\r\nHost: nowhere\r\nContent-Length: 0\r\n\r\n")
 	if r.Reason != http_proxy.ReasonExitRefused {
 		t.Errorf("reply = {Reason: %q, Error: %q}, want %q", r.Reason, r.Error, http_proxy.ReasonExitRefused)
+	}
+}
+
+// An inner request that carries a caller's header is refused before anything
+// goes upstream, so a client that leaks one fails loudly.
+func TestCallerHeadersAreRefused(t *testing.T) {
+	reached := false
+	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached = true }))
+	defer upstream.Close()
+	cfg := &http_proxy.Config{Networks: map[string]string{"net": upstream.URL}}
+	r := rawRoundTrip(t, cfg, "POST /net HTTP/1.1\r\nHost: nowhere\r\nUser-Agent: Mozilla/5.0\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}")
+	if r.Reason != http_proxy.ReasonExitRefused || !strings.Contains(r.Error, "User-Agent") || strings.Contains(r.Error, "Mozilla") {
+		t.Errorf("reply = {Reason: %q, Error: %q}, want %q naming User-Agent, not its value", r.Reason, r.Error, http_proxy.ReasonExitRefused)
+	}
+	if reached {
+		t.Error("the upstream was reached")
 	}
 }
 
@@ -208,11 +221,11 @@ func handler(cfg *http_proxy.Config) (*proxyRequestHandler, chan *http_proxy.Res
 
 func send(t *testing.T, h *proxyRequestHandler, id uint64, path string, body []byte) {
 	t.Helper()
-	req, _ := http.NewRequest(http.MethodPost, "http://nowhere"+path, bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	buf := new(bytes.Buffer)
-	req.Write(buf)
-	compressed, _ := common.CompressData(buf.Bytes())
+	inner, err := http_proxy.NewInnerRequest(http.MethodPost, path, "application/json", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compressed, _ := common.CompressData(inner)
 	payload, _ := cbor.Marshal(&http_proxy.Request{Payload: compressed})
 	h.OnCommand(&cborplugin.Request{ID: id, SURB: []byte("surb"), Payload: payload})
 }
@@ -287,11 +300,11 @@ func TestHungUpstreamIsUpstreamUnreachable(t *testing.T) {
 // sendURL sends a request that names its own upstream.
 func sendURL(t *testing.T, h *proxyRequestHandler, rawURL, method, contentType string) {
 	t.Helper()
-	req, _ := http.NewRequest(method, "http://nowhere/_/url", strings.NewReader(`{"id":1}`))
-	req.Header.Set("Content-Type", contentType)
-	buf := new(bytes.Buffer)
-	req.Write(buf)
-	compressed, _ := common.CompressData(buf.Bytes())
+	inner, err := http_proxy.NewInnerRequest(method, http_proxy.UserURLPath, contentType, []byte(`{"id":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	compressed, _ := common.CompressData(inner)
 	payload, _ := cbor.Marshal(&http_proxy.Request{Payload: compressed, URL: rawURL})
 	h.OnCommand(&cborplugin.Request{ID: 1, SURB: []byte("surb"), Payload: payload})
 }

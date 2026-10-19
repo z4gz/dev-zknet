@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"errors"
 	"flag"
@@ -108,15 +107,6 @@ func main() {
 	os.Remove(socketFile)
 }
 
-func validateRequestURL(uri string) error {
-	// An absolute-form request line with no path ("POST https://x HTTP/1.1")
-	// parses with an empty path.
-	if uri == "" || uri[0] != '/' {
-		return errors.New("uri must start with a slash")
-	}
-	return nil
-}
-
 type proxyRequestHandler struct {
 	cfg            *http_proxy.Config
 	log            *logging.Logger
@@ -213,19 +203,13 @@ func (s *proxyRequestHandler) handle(r *cborplugin.Request) error {
 		s.log.Errorf("decompress failed: %s", err)
 		return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, "Failed to decompress request")
 	}
-	request, err := http.ReadRequest(bufio.NewReader(bytes.NewReader(requestPayload)))
+	request, err := http_proxy.ReadInnerRequest(requestPayload)
 	if err != nil {
-		s.log.Errorf("http.ReadRequest failed: %s", err)
-		return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, "Failed to read HTTP request")
+		s.log.Errorf("request %d: refused inner request: %s", r.ID, err)
+		return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, fmt.Sprintf("inner request refused: %s", err))
 	}
 
 	s.log.Debugf("Request URL Path: %s", request.URL.Path)
-
-	err = validateRequestURL(request.URL.Path)
-	if err != nil {
-		s.log.Errorf("validateRequestURL failed: %s", err)
-		return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, fmt.Sprintf("validateRequestURL failed: %s", err.Error()))
-	}
 
 	if req.URL != "" {
 		return s.serveUserURL(r, req.URL, request)
