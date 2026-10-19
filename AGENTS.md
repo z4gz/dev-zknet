@@ -25,3 +25,7 @@
 # Upgrading Katzenpost
 
 When asked to upgrade the upstream katzenpost version, follow `packages/opt/UPGRADING.md`.
+
+# Project directives
+
+- **Cite specs by name and version** in code, comments, commits and docs (e.g. `Anon-RPC SPEC v0.3.2 §3.2`). Never cite a bare section number or an unversioned spec.
