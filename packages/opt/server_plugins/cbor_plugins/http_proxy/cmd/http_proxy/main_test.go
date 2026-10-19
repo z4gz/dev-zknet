@@ -120,10 +120,16 @@ func TestExitFailuresCarryReasons(t *testing.T) {
 	}
 }
 
-// A probe reply stays an empty payload, as before.
-func TestProbeReplyIsUnchanged(t *testing.T) {
-	if p := roundTrip(t, nil, "/_/probe"); p != nil {
-		t.Errorf("probe reply = %x, want nil", p)
+// A probe is answered as a relayed reply: status 200 with an empty body.
+func TestProbeIsAnsweredWithAnEmpty200(t *testing.T) {
+	for _, path := range []string{"/_/probe", "/_/probe/0"} {
+		r := decode(t, roundTrip(t, nil, path))
+		if r.Error != "" || r.Reason != "" || r.Status != http.StatusOK {
+			t.Errorf("%s: reply = {Status: %d, Reason: %q, Error: %q}, want 200", path, r.Status, r.Reason, r.Error)
+		}
+		if body, err := common.DecompressData(r.Payload); err != nil || len(body) != 0 {
+			t.Errorf("%s: body = %q (%v), want empty", path, body, err)
+		}
 	}
 }
 

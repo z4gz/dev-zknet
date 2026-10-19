@@ -82,13 +82,8 @@ function report(label: string, r: FetchResult): void {
 
 const result = (r: FetchResult) => (JSON.parse(r.bodyText ?? '{}') as { result?: unknown }).result;
 
-/**
- * The exit answered a probe: it replies with an empty payload, which
- * WalletShield reports as bad-reply. Only a mix timeout or a refusal before
- * sending means it did not.
- */
-const exitAnswered = (res: Response | undefined) =>
-  res !== undefined && !['mix-timeout', 'too-large'].includes(res.headers.get('zknet-error') ?? '');
+/** The exit answered a probe: it answers as an upstream would, 200 with an empty body. */
+const exitAnswered = (res: Response | undefined) => res?.status === 200 && !res.headers.has('zknet-error');
 
 /** The mix round trip, from WalletShield's exit probe: one mixnet round trip, the exit answers without an upstream. */
 test('mix round-trip time', async () => {

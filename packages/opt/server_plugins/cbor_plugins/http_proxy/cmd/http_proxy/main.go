@@ -241,8 +241,7 @@ func (s *proxyRequestHandler) handle(r *cborplugin.Request) error {
 				time.Sleep(delay)
 			}
 		}
-		go s.write(&cborplugin.Response{ID: r.ID, SURB: r.SURB, Payload: nil})
-		return nil
+		return s.answerProbe(r)
 	}
 
 	uri := request.URL.Path
@@ -333,6 +332,21 @@ func (s *proxyRequestHandler) relay(r *cborplugin.Request, client *http.Client, 
 		return s.sendError(r.ID, r.SURB, http_proxy.ReasonTooLarge, "HTTP response is too big")
 	}
 
+	go s.write(&cborplugin.Response{ID: r.ID, SURB: r.SURB, Payload: payload})
+	return nil
+}
+
+// answerProbe answers a probe, an exit round trip without an upstream, as a
+// relayed reply would be: status 200 with an empty body.
+func (s *proxyRequestHandler) answerProbe(r *cborplugin.Request) error {
+	empty, err := common.CompressData(nil)
+	if err != nil {
+		return s.sendError(r.ID, r.SURB, http_proxy.ReasonUpstreamUnreachable, "Failed to compress response")
+	}
+	payload, err := cbor.Marshal(&http_proxy.Response{Payload: empty, Status: http.StatusOK})
+	if err != nil {
+		return s.sendError(r.ID, r.SURB, http_proxy.ReasonUpstreamUnreachable, "Error marshaling response")
+	}
 	go s.write(&cborplugin.Response{ID: r.ID, SURB: r.SURB, Payload: payload})
 	return nil
 }

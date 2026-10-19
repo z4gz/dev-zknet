@@ -267,3 +267,16 @@ func TestRPCMethod(t *testing.T) {
 		}
 	}
 }
+
+// The exit answers a probe as an empty 200, which logs as a normal rpc line.
+func TestProbeLogsAsARequest(t *testing.T) {
+	h, logged := loggedServer(log.InfoLevel, exitReply(t, http.StatusOK, nil, ""))
+	resp := serve(h, httptest.NewRequest(http.MethodPost, "/_/probe/0", nil))
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+	want := "INFO walletshield: rpc id=1 route=probe to=exit rpc=? status=200 in=0B out=0B took="
+	if out := logged.String(); !strings.Contains(out, want) || strings.Contains(out, "WARN") {
+		t.Errorf("the log lacks %q:\n%s", want, out)
+	}
+}
