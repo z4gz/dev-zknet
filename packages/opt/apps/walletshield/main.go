@@ -10,11 +10,13 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"math"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/carlmjohnson/versioninfo"
@@ -114,6 +116,9 @@ type Server struct {
 	// send carries one serialized HTTP request, and the user's provider URL
 	// when there is one, over the mixnet and returns the raw reply.
 	send func(httpRequestBytes []byte, userURL string) ([]byte, error)
+
+	// requests numbers the requests for the log.
+	requests atomic.Uint64
 }
 
 // setListenAddress overrides the address of the client daemon's configured
@@ -166,7 +171,7 @@ func main() {
 
 	flag.StringVar(&configPath, "config", "", "file path of the client configuration TOML file")
 	flag.IntVar(&delayStart, "delay_start", 0, "max random seconds to delay start")
-	flag.StringVar(&logLevel, "log_level", "DEBUG", "logging level could be set to: DEBUG, INFO, WARNING, ERROR, CRITICAL")
+	flag.StringVar(&logLevel, "log_level", "DEBUG", "logging level: DEBUG (every request in full), INFO (one line per request), WARN or ERROR")
 	flag.StringVar(&listenAddr, "listen", "", "local socket to listen HTTP on")
 	flag.StringVar(&listenAddrClient, "listen_client", "", "local network address for the client daemon")
 	flag.BoolVar(&testProbe, "probe", false, "send test probes instead of handling requests")
@@ -189,10 +194,12 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	mylog := log.NewWithOptions(os.Stdout, log.Options{
-		Prefix: "walletshield:",
-		Level:  level,
-	})
+	mylog := newLogger(os.Stdout, level)
+	mode := "daemon"
+	if thinClientOnly {
+		mode = "thin"
+	}
+	mylog.Info("starting", "version", versioninfo.Short(), "mode", mode, "log", level)
 
 	if delayStart > 0 {
 		d := rand.NewMath().Intn(delayStart)
@@ -229,7 +236,7 @@ func main() {
 
 		cfgThin = thin.FromConfig(cfg)
 
-		fmt.Println("Sleeping for 3 seconds to let the client daemon startup...")
+		mylog.Debug("waiting 3s for the client daemon to start")
 		time.Sleep(time.Second * 3) // XXX ugly hack but works: FIXME
 	} else {
 		cfgThin, err = thin.LoadFile(configPath)
@@ -252,8 +259,9 @@ func main() {
 	thin := thin.NewThinClient(cfgThin, logging)
 	err = thin.Dial()
 	if err != nil {
-		panic(err)
+		mylog.Fatal("cannot connect to the client daemon", "err", err)
 	}
+	logMixnet(mylog, thin)
 
 	// http server
 	server := &Server{
@@ -268,64 +276,218 @@ func main() {
 		d.Shutdown()
 	} else {
 		http.HandleFunc("/", withCORS(server.Handler))
+		mylog.Info("listening", "addr", listenAddr)
 		err := http.ListenAndServe(listenAddr, nil)
 		if err != nil {
 			// Check if the error is related to the port being in use
 			if strings.Contains(err.Error(), "bind: address already in use") {
-				mylog.Errorf("Cannot start server: Listen port %s is already in use. Please check if another instance of walletshield is running or use another port.", listenAddr)
+				mylog.Error("cannot listen: the port is in use; is another WalletShield running?", "addr", listenAddr)
 			} else {
-				mylog.Errorf("Failed to start HTTP server: %s", err)
+				mylog.Error("cannot listen", "addr", listenAddr, "err", err)
 			}
 		}
 	}
 }
 
+// newLogger is WalletShield's logger: HH:MM:SS.mmm LEVEL walletshield: <msg>
+// key=value ...
+func newLogger(w io.Writer, level log.Level) *log.Logger {
+	return log.NewWithOptions(w, log.Options{
+		Prefix:          "walletshield",
+		Level:           level,
+		ReportTimestamp: true,
+		TimeFormat:      "15:04:05.000",
+	})
+}
+
+// logMixnet reports what the client sees of the mixnet once connected: the
+// PKI epoch and how many exits offer the proxy service.
+func logMixnet(l *log.Logger, t *thin.ThinClient) {
+	doc := t.PKIDocument()
+	if doc == nil {
+		l.Warn("connected to the client daemon, but it has no PKI document yet")
+		return
+	}
+	exits, _ := t.GetServices(ProxyHTTPService)
+	if len(exits) == 0 {
+		l.Warn("connected to the mixnet, but no exit offers "+ProxyHTTPService+"; requests will fail", "epoch", doc.Epoch)
+		return
+	}
+	l.Info("connected to the mixnet", "epoch", doc.Epoch, "exits", len(exits))
+}
+
+// The request log. WalletShield runs on the user's own machine, so its log
+// is the user's to read; the levels set how much of it they see. Each request
+// is numbered (id), and every line about it carries id, route and to:
+//
+//	network  POST /<network key>, to= the key
+//	url      POST /_/url with the provider in ZKNet-URL, to= its host
+//	probe    /_/probe/<delay>, an exit round trip without an upstream
+//
+// INFO logs one "rpc" line per request when it ends: the JSON-RPC method,
+// status, body sizes and total time (took), or a WARN with the failure reason.
+// It never carries a body, a header value or a URL beyond the provider's host.
+//
+// The rpc line is the record. DEBUG attaches what it lacks, keyed by id, in the
+// same stream: a "request" line on arrival with the route, the full URL, the
+// headers as they arrived and the body, and a "reply" line when the exit
+// answered, with the headers that came back from it and the body. Their JSON
+// is written raw, one record per line, so a value pastes into jq.
+
+// rpcMethod names a JSON-RPC request body for the log: its method, batch(N)
+// for a batch, or ? when the body is not JSON-RPC.
+func rpcMethod(body []byte) string {
+	body = bytes.TrimSpace(body)
+	if len(body) > 0 && body[0] == '[' {
+		var batch []json.RawMessage
+		if json.Unmarshal(body, &batch) == nil {
+			return fmt.Sprintf("batch(%d)", len(batch))
+		}
+		return "?"
+	}
+	var call struct {
+		Method string `json:"method"`
+	}
+	if json.Unmarshal(body, &call) == nil && call.Method != "" {
+		return call.Method
+	}
+	return "?"
+}
+
+// route classifies a request for the log; see above.
+func route(path, userURL string) (form, to string) {
+	switch {
+	case path == http_proxy.UserURLPath:
+		to = "(none)"
+		if u, err := url.Parse(userURL); err == nil && u.Host != "" {
+			to = u.Host
+		} else if userURL != "" {
+			to = "(unparsable)"
+		}
+		return "url", to
+	case strings.HasPrefix(path, "/_/probe"):
+		return "probe", "exit"
+	default:
+		return "network", strings.TrimPrefix(path, "/")
+	}
+}
+
+// rawJSON is b compacted for a one-line log value, or b as a quoted string
+// when it is not JSON.
+func rawJSON(b []byte) string {
+	var c bytes.Buffer
+	if len(bytes.TrimSpace(b)) > 0 && json.Compact(&c, b) == nil {
+		return c.String()
+	}
+	return strconv.Quote(string(b))
+}
+
+// headersJSON is h as a compact JSON object.
+func headersJSON(h http.Header) string {
+	if h == nil {
+		h = http.Header{}
+	}
+	b, _ := json.Marshal(h)
+	return string(b)
+}
+
+// logValue is s as a log value: as is, or quoted when it would not read as
+// one value.
+func logValue(s string) string {
+	if s == "" || strings.ContainsAny(s, " \t\r\n\"\\") {
+		return strconv.Quote(s)
+	}
+	return s
+}
+
 func (s *Server) Handler(w http.ResponseWriter, req *http.Request) {
-	s.log.Infof("Received HTTP request for %s", req.URL)
+	start := time.Now()
 
 	if req.Method == http.MethodGet && req.URL.Path == healthPath {
 		writeJSON(w, http.StatusOK, map[string]string{"version": versioninfo.Short()})
 		return
 	}
 
+	id := s.requests.Add(1)
+	debug := s.log.GetLevel() <= log.DebugLevel
+	l := s.log.With("id", id)
+	rpc, in := "?", 0
+	warn := func(reason, message string) {
+		l.Warn("rpc", "rpc", rpc, "status", failureStatus[reason], "reason", reason, "in", size(in), "took", since(start), "err", message)
+	}
+	fail := func(reason, message string) {
+		warn(reason, message)
+		writeFailure(w, reason, message)
+	}
+
 	myurl, err := url.Parse(req.RequestURI)
 	if err != nil {
-		s.log.Errorf("url.Parse(req.RequestURI) failed: %s", err)
+		fail(http_proxy.ReasonExitRefused, "the request URI does not parse")
 		return
 	}
+
+	// The DEBUG request line shows the headers as they arrived, ZKNet-URL
+	// included.
+	var inHeaders string
+	if debug {
+		inHeaders = headersJSON(req.Header)
+	}
+	full := *myurl
+	if !full.IsAbs() {
+		full.Scheme, full.Host = "http", req.Host
+	}
+	fullURL := full.String()
 	req.URL = myurl
 	req.RequestURI = ""
 
 	// Provider selection: POST /_/url names its upstream in URLHeader. The
-	// header never crosses the mixnet; only the URL's host is logged.
+	// header never crosses the mixnet; INFO logs only the URL's host.
 	userURL := req.Header.Get(http_proxy.URLHeader)
 	req.Header.Del(http_proxy.URLHeader)
-	if myurl.Path == http_proxy.UserURLPath {
+	form, to := route(myurl.Path, userURL)
+	l = l.With("route", form, "to", to)
+	if form == "url" {
+		fullURL = userURL
 		if userURL == "" {
-			writeFailure(w, http_proxy.ReasonExitRefused, fmt.Sprintf("POST %s needs a %s header", http_proxy.UserURLPath, http_proxy.URLHeader))
-			return
+			fullURL = "(none)"
 		}
-		host := "(unparsable)"
-		if u, err := url.Parse(userURL); err == nil {
-			host = u.Host
-		}
-		s.log.Infof("Provider host %s", host)
 	} else {
 		userURL = ""
+	}
+
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		fail(http_proxy.ReasonExitRefused, "cannot read the request body")
+		return
+	}
+	req.Body = io.NopCloser(bytes.NewReader(body))
+	rpc, in = rpcMethod(body), len(body)
+	if debug {
+		s.log.Debug(fmt.Sprintf("request id=%d route=%s url=%s headers=%s body=%s",
+			id, form, logValue(fullURL), inHeaders, rawJSON(body)))
+	}
+	// reply logs, at DEBUG, the headers that came back from the exit and the
+	// body the caller receives.
+	reply := func(header http.Header, body []byte) {
+		if debug {
+			s.log.Debug(fmt.Sprintf("reply id=%d headers=%s body=%s", id, headersJSON(header), rawJSON(body)))
+		}
+	}
+
+	if form == "url" && userURL == "" {
+		fail(http_proxy.ReasonExitRefused, fmt.Sprintf("POST %s needs a %s header", http_proxy.UserURLPath, http_proxy.URLHeader))
+		return
 	}
 
 	buf := new(bytes.Buffer)
 	req.Write(buf)
 
-	s.log.Debugf("RAW HTTP REQUEST:\n%s", string(buf.Bytes()))
-
 	rawReply, err := s.send(buf.Bytes(), userURL)
 	if err != nil {
-		s.log.Errorf("Failed to send message: %s", err)
 		if errors.Is(err, errTooLarge) {
-			writeFailure(w, http_proxy.ReasonTooLarge, err.Error())
+			fail(http_proxy.ReasonTooLarge, err.Error())
 		} else {
-			writeFailure(w, http_proxy.ReasonMixTimeout, err.Error())
+			fail(http_proxy.ReasonMixTimeout, err.Error())
 		}
 		return
 	}
@@ -336,33 +498,32 @@ func (s *Server) Handler(w http.ResponseWriter, req *http.Request) {
 	dec := cbor.NewDecoder(bytes.NewReader(rawReply))
 	err = dec.Decode(response)
 	if err != nil {
-		s.log.Errorf("Failed to decode response: %s", err)
-		writeFailure(w, http_proxy.ReasonBadReply, fmt.Sprintf("cannot decode exit reply: %s", err))
+		fail(http_proxy.ReasonBadReply, fmt.Sprintf("cannot decode exit reply: %s", err))
 		return
 	}
 
 	if response.Error != "" {
-		s.log.Errorf("Response Error: %s", response.Error)
-		writeFailure(w, exitReason(response), response.Error)
+		reason := exitReason(response)
+		body := failureHeaders(w, reason, response.Error)
+		reply(http.Header{http.CanonicalHeaderKey(http_proxy.ErrorHeader): {reason}}, body)
+		warn(reason, response.Error)
+		w.WriteHeader(failureStatus[reason])
+		w.Write(body)
 		return
 	}
 
 	responsePayload, err := common.DecompressData(response.Payload)
 	if err != nil {
-		s.log.Errorf("common.DecompressData failed: %s", err)
-		writeFailure(w, http_proxy.ReasonBadReply, fmt.Sprintf("cannot decompress exit reply: %s", err))
+		fail(http_proxy.ReasonBadReply, fmt.Sprintf("cannot decompress exit reply: %s", err))
 		return
 	}
 
 	status := response.Status
 	header := http_proxy.FilterHeaders(response.Header)
 	if status < 200 || status > 599 {
-		s.log.Errorf("Invalid upstream status %d", status)
-		writeFailure(w, http_proxy.ReasonBadReply, fmt.Sprintf("invalid upstream status %d", status))
+		fail(http_proxy.ReasonBadReply, fmt.Sprintf("invalid upstream status %d", status))
 		return
 	}
-
-	s.log.Infof("Response %d: %s", status, responsePayload)
 
 	for k, v := range header {
 		w.Header()[k] = v
@@ -372,8 +533,20 @@ func (s *Server) Handler(w http.ResponseWriter, req *http.Request) {
 		w.Header()["Content-Type"] = nil
 	}
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(responsePayload)))
+	reply(header, responsePayload)
+	l.Info("rpc", "rpc", rpc, "status", status, "in", size(in), "out", size(len(responsePayload)), "took", since(start))
 	w.WriteHeader(status)
 	w.Write(responsePayload)
+}
+
+// since is the time from t, rounded for the log.
+func since(t time.Time) time.Duration {
+	return time.Since(t).Round(time.Millisecond)
+}
+
+// size is a byte count for the log.
+func size(n int) string {
+	return fmt.Sprintf("%dB", n)
 }
 
 // exitReason returns the Reason of an exit error reply; a reason this
@@ -388,20 +561,64 @@ func exitReason(r *http_proxy.Response) string {
 // writeFailure answers with a reply WalletShield originates, marked by
 // ErrorHeader so it is never mistaken for an upstream reply.
 func writeFailure(w http.ResponseWriter, reason, message string) {
+	body := failureHeaders(w, reason, message)
+	w.WriteHeader(failureStatus[reason])
+	w.Write(body)
+}
+
+// failureHeaders sets the headers of a failure reply and returns its body.
+func failureHeaders(w http.ResponseWriter, reason, message string) []byte {
 	type failure struct {
 		Reason  string `json:"reason"`
 		Message string `json:"message"`
 	}
 	w.Header().Set(http_proxy.ErrorHeader, reason)
-	writeJSON(w, failureStatus[reason], map[string]failure{"error": {reason, message}})
+	return jsonHeaders(w, map[string]failure{"error": {reason, message}})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
+	body := jsonHeaders(w, v)
+	w.WriteHeader(status)
+	w.Write(body)
+}
+
+// jsonHeaders sets the headers of a JSON reply and returns its body.
+func jsonHeaders(w http.ResponseWriter, v any) []byte {
 	body, _ := json.Marshal(v)
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(body)))
-	w.WriteHeader(status)
-	w.Write(body)
+	return body
+}
+
+// probeStats tallies the probes of -probe mode.
+type probeStats struct {
+	sent, got                int
+	rttMin, rttMax, rttTotal time.Duration
+}
+
+func (p *probeStats) lost() { p.sent++ }
+
+func (p *probeStats) received(rtt time.Duration) {
+	p.sent++
+	p.got++
+	p.rttTotal += rtt
+	if p.got == 1 || rtt < p.rttMin {
+		p.rttMin = rtt
+	}
+	p.rttMax = max(p.rttMax, rtt)
+}
+
+// log logs the tally so far, in the units of the rpc line's took:
+// probe sent= received= loss= rtt_min= rtt_avg= rtt_max=, without the rtt
+// fields until a probe comes back.
+func (p *probeStats) log(l *log.Logger) {
+	loss := float64(p.sent-p.got) / float64(p.sent) * 100
+	kv := []any{"sent", p.sent, "received", p.got, "loss", fmt.Sprintf("%.0f%%", loss)}
+	if p.got > 0 {
+		avg := (p.rttTotal / time.Duration(p.got)).Round(time.Millisecond)
+		kv = append(kv, "rtt_min", p.rttMin, "rtt_avg", avg, "rtt_max", p.rttMax)
+	}
+	l.Info("probe", kv...)
 }
 
 func (s *Server) SendTestProbes(testProbeSendDelay int, testProbeCount int, testProbeResponseDelay int) {
@@ -415,39 +632,20 @@ func (s *Server) SendTestProbes(testProbeSendDelay int, testProbeCount int, test
 	req.Write(buf)
 	httpRequestBytes := buf.Bytes()
 
-	var packetsTransmitted, packetsReceived int
-	var rttMin, rttMax, rttTotal float64
-	rttMin = math.MaxFloat64
-
+	var stats probeStats
 	for {
-		packetsTransmitted++
 		t := time.Now()
-
 		_, err = sendRequest(s.thin, httpRequestBytes, "")
-		elapsed := time.Since(t).Seconds()
 		if err != nil {
-			s.log.Errorf("Probe failed after %.2fs: %s", elapsed, err)
+			s.log.Warn("probe", "sent", stats.sent+1, "took", since(t), "err", err)
+			stats.lost()
 		} else {
-			packetsReceived++
-			rttTotal += elapsed
-			if elapsed < rttMin {
-				rttMin = elapsed
-			}
-			if elapsed > rttMax {
-				rttMax = elapsed
-			}
+			stats.received(since(t))
 		}
-
-		packetLoss := float64(packetsTransmitted-packetsReceived) / float64(packetsTransmitted) * 100
-		rttAvg := rttTotal / float64(packetsReceived)
-		if packetsReceived == 0 {
-			rttMin = math.NaN()
-		}
-		s.log.Infof("Probe packet transmitted/received/loss = %d/%d/%.1f%% | rtt min/avg/max = %.2f/%.2f/%.2f s",
-			packetsTransmitted, packetsReceived, packetLoss, rttMin, rttAvg, rttMax)
+		stats.log(s.log)
 
 		// probe indefinitely if testProbeCount is 0
-		if testProbeCount != 0 && packetsTransmitted >= testProbeCount {
+		if testProbeCount != 0 && stats.sent >= testProbeCount {
 			os.Exit(0)
 		}
 
