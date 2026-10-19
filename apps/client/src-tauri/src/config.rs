@@ -9,6 +9,7 @@ pub struct ZKNetClientCfg {
     pub api_listen_address: String,
     pub default_walletshield_listen_address: String,
     pub url_network: String,
+    pub walletshield_log_level: String,
     pub walletshield_thin: bool,
 }
 

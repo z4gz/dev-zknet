@@ -14,6 +14,7 @@ type Capability = { identifier: string; permissions: Permission[] };
 const capabilityFiles: Capability[] = readdirSync(join(tauri, 'capabilities')).map((f) =>
   readJson(join('capabilities', f)),
 );
+const shipped = readJson('tauri.conf.json');
 const devLocal = readJson('tauri.dev-local.conf.json');
 
 const enabledCapabilities = (config?: {
@@ -52,12 +53,27 @@ const resolveArgv = (scopes: SpawnScope[], name: string, args: string[]) => {
 
 describe('walletshield spawn', () => {
   it.each([
-    ['production', enabledCapabilities(), false],
-    ['dev-local', enabledCapabilities(devLocal), true],
-  ])('%s executes exactly the arguments the client passes', (_, capabilities, thin) => {
-    const { scope, args } = walletshieldSpawn('127.0.0.1:7070', thin);
+    ['production', enabledCapabilities(), false, shipped.plugins.zknet.walletshieldLogLevel],
+    ['dev-local', enabledCapabilities(devLocal), true, devLocal.plugins.zknet.walletshieldLogLevel],
+  ])('%s executes exactly the arguments the client passes', (_, capabilities, thin, logLevel) => {
+    const { scope, args } = walletshieldSpawn('127.0.0.1:7070', thin, logLevel);
     expect(resolveArgv(spawnScopes(capabilities), scope, args)).toEqual(args);
     expect(args.includes('-thin')).toBe(thin);
+  });
+
+  it('runs shipped clients at INFO and the dev-local app at DEBUG', () => {
+    expect(shipped.plugins.zknet.walletshieldLogLevel).toBe('INFO');
+    expect(devLocal.plugins.zknet.walletshieldLogLevel).toBe('DEBUG');
+  });
+
+  it.each(['TRACE', 'info', 'INFO -thin', ''])('rejects the log level %j', (logLevel) => {
+    for (const [capabilities, thin] of [
+      [enabledCapabilities(), false],
+      [enabledCapabilities(devLocal), true],
+    ] as const) {
+      const { scope, args } = walletshieldSpawn(':7070', thin, logLevel);
+      expect(() => resolveArgv(spawnScopes(capabilities), scope, args)).toThrow('rejected');
+    }
   });
 
   it('keeps spawn scope names unique, so no scope shadows another', () => {
@@ -71,7 +87,7 @@ describe('walletshield spawn', () => {
   });
 
   it('keeps the thin scope out of production builds', () => {
-    const { scope } = walletshieldSpawn(':7070', true);
+    const { scope } = walletshieldSpawn(':7070', true, 'INFO');
     expect(spawnScopes(enabledCapabilities()).some((s) => s.name === scope)).toBe(false);
   });
 });

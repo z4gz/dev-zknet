@@ -66,7 +66,7 @@ export function Networks() {
   }
 
   async function clientStart() {
-    const { urlNetwork, walletshieldThin } = await getZKNetClientCfg();
+    const { urlNetwork, walletshieldLogLevel, walletshieldThin } = await getZKNetClientCfg();
 
     const urlClientCfg = `${urlNetwork}/${networkId}/client.toml`;
     const urlServices = `${urlNetwork}/${networkId}/services.json`;
@@ -142,7 +142,7 @@ export function Networks() {
     setMessage('info', 'Starting network client...');
     const cmd = 'walletshield';
     const wla = await getWalletshieldListenAddress();
-    const { scope, args } = walletshieldSpawn(wla, walletshieldThin);
+    const { scope, args } = walletshieldSpawn(wla, walletshieldThin, walletshieldLogLevel);
     const command = Command.create(scope, args, {
       cwd: dirNetwork,
       env: {

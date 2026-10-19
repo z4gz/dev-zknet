@@ -11,6 +11,8 @@ pub struct AppConfig {
     pub api_listen_address: String,
     pub url_network: String,
     pub walletshield_listen_address: String,
+    /// WalletShield's -log_level: INFO for users, DEBUG for development.
+    pub walletshield_log_level: String,
     /// Run WalletShield as a thin client of an already running client daemon.
     pub walletshield_thin: bool,
 }

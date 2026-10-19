@@ -5,8 +5,8 @@
 export const WALLETSHIELD_SCOPE = 'walletshield-listen';
 export const WALLETSHIELD_THIN_SCOPE = 'walletshield-listen-thin';
 
-export const walletshieldSpawn = (listenAddress: string, thin: boolean) => {
-  const args = ['-listen', listenAddress, '-config', 'client.toml'];
+export const walletshieldSpawn = (listenAddress: string, thin: boolean, logLevel: string) => {
+  const args = ['-listen', listenAddress, '-config', 'client.toml', '-log_level', logLevel];
   return thin
     ? { scope: WALLETSHIELD_THIN_SCOPE, args: [...args, '-thin'] }
     : { scope: WALLETSHIELD_SCOPE, args };

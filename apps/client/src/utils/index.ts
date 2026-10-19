@@ -9,6 +9,7 @@ export interface ZKNetClientCfg {
   apiListenAddress: string;
   defaultWalletshieldListenAddress: string;
   urlNetwork: string;
+  walletshieldLogLevel: string;
   walletshieldThin: boolean;
 }
 

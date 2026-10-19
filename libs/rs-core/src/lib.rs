@@ -75,6 +75,8 @@ fn walletshield_args(config: &crate::config::AppConfig) -> Vec<String> {
         config.walletshield_listen_address.clone(),
         "-config".into(),
         "client.toml".into(),
+        "-log_level".into(),
+        config.walletshield_log_level.clone(),
     ];
     if config.walletshield_thin {
         args.push("-thin".into());
@@ -208,6 +210,7 @@ mod tests {
             api_listen_address: "127.0.0.1:7000".into(),
             url_network: "http://127.0.0.1:8765".into(),
             walletshield_listen_address: ":7070".into(),
+            walletshield_log_level: "INFO".into(),
             walletshield_thin,
         }
     }
@@ -216,11 +219,19 @@ mod tests {
     fn walletshield_args_select_thin_mode() {
         assert_eq!(
             walletshield_args(&config(false)),
-            ["-listen", ":7070", "-config", "client.toml"]
+            ["-listen", ":7070", "-config", "client.toml", "-log_level", "INFO"]
         );
         assert_eq!(
             walletshield_args(&config(true)),
-            ["-listen", ":7070", "-config", "client.toml", "-thin"]
+            [
+                "-listen",
+                ":7070",
+                "-config",
+                "client.toml",
+                "-log_level",
+                "INFO",
+                "-thin"
+            ]
         );
     }
 }

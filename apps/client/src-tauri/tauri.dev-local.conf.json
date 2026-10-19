@@ -25,6 +25,8 @@
                     { "validator": "^(\\S*:\\d+)$" },
                     "-config",
                     "client.toml",
+                    "-log_level",
+                    { "validator": "^(DEBUG|INFO|WARN|ERROR)$" },
                     "-thin"
                   ],
                   "sidecar": false
@@ -39,6 +41,7 @@
   "plugins": {
     "zknet": {
       "urlNetwork": "http://127.0.0.1:8765",
+      "walletshieldLogLevel": "DEBUG",
       "walletshieldThin": true
     }
   }

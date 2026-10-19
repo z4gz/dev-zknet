@@ -7,7 +7,8 @@ pnpm nx run @zknet/client:desktop-dev-local   # against the local mixnet; connec
 
 `desktop-dev-local` serves the local mixnet's assets (see `apps/network-assets`) and
 runs `tauri dev --config src-tauri/tauri.dev-local.conf.json`. That overlay only exists in
-this target. It points `urlNetwork` at the local server, sets `walletshieldThin`, and adds
+this target. It points `urlNetwork` at the local server, sets `walletshieldThin`, runs
+WalletShield at `DEBUG` (`walletshieldLogLevel`; packaged builds run `INFO`), and adds
 a `dev-local` capability allowing that server and the thin WalletShield spawn. Packaged
 builds contain neither. In thin mode the client re-downloads WalletShield on every
 connect, so a rebuilt binary is never shadowed by a cached copy.
