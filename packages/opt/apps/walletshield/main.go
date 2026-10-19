@@ -76,8 +76,9 @@ var failureStatus = map[string]int{
 	http_proxy.ReasonProviderSelectionOff: http.StatusBadGateway,
 }
 
-// sendRequest carries one serialized HTTP request to the exit. userURL, when
-// not empty, is the upstream the user chose (http_proxy.Request.URL).
+// sendRequest carries one inner request (http_proxy.NewInnerRequest) to the
+// exit. userURL, when not empty, is the upstream the user chose
+// (http_proxy.Request.URL).
 func sendRequest(thin *thin.ThinClient, httpRequestBytes []byte, userURL string) ([]byte, error) {
 	// Compress the HTTP request
 	compressedPayload, err := common.CompressData(httpRequestBytes)
@@ -125,7 +126,7 @@ type Server struct {
 	daemon *client.Daemon
 	thin   *thin.ThinClient
 
-	// send carries one serialized HTTP request, and the user's provider URL
+	// send carries one inner request, and the user's provider URL
 	// when there is one, over the mixnet and returns the raw reply.
 	send func(httpRequestBytes []byte, userURL string) ([]byte, error)
 
@@ -449,13 +450,10 @@ func (s *Server) Handler(w http.ResponseWriter, req *http.Request) {
 		full.Scheme, full.Host = "http", req.Host
 	}
 	fullURL := full.String()
-	req.URL = myurl
-	req.RequestURI = ""
 
 	// Provider selection: POST /_/url names its upstream in URLHeader. The
 	// header never crosses the mixnet; INFO logs only the URL's host.
 	userURL := req.Header.Get(http_proxy.URLHeader)
-	req.Header.Del(http_proxy.URLHeader)
 	form, to := route(myurl.Path, userURL)
 	l = l.With("route", form, "to", to)
 	if form == "url" {
@@ -472,7 +470,6 @@ func (s *Server) Handler(w http.ResponseWriter, req *http.Request) {
 		fail(http_proxy.ReasonExitRefused, "cannot read the request body")
 		return
 	}
-	req.Body = io.NopCloser(bytes.NewReader(body))
 	rpc, in = rpcMethod(body), len(body)
 	if debug {
 		s.log.Debug(fmt.Sprintf("request id=%d route=%s url=%s headers=%s body=%s",
@@ -491,10 +488,15 @@ func (s *Server) Handler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	buf := new(bytes.Buffer)
-	req.Write(buf)
+	// The exit gets a request built afresh from the fields it uses, never
+	// the caller's: no browser header crosses the mixnet. A query is dropped.
+	inner, err := http_proxy.NewInnerRequest(req.Method, myurl.EscapedPath(), req.Header.Get("Content-Type"), body)
+	if err != nil {
+		fail(http_proxy.ReasonExitRefused, err.Error())
+		return
+	}
 
-	rawReply, err := s.send(buf.Bytes(), userURL)
+	rawReply, err := s.send(inner, userURL)
 	if err != nil {
 		if errors.Is(err, errTooLarge) {
 			fail(http_proxy.ReasonTooLarge, err.Error())
@@ -634,15 +636,12 @@ func (p *probeStats) log(l *log.Logger) {
 }
 
 func (s *Server) SendTestProbes(testProbeSendDelay int, testProbeCount int, testProbeResponseDelay int) {
-	url := fmt.Sprintf("http://nowhere/_/probe/%d", testProbeResponseDelay)
-	req, err := http.NewRequest("GET", url, nil)
+	path := fmt.Sprintf("/_/probe/%d", testProbeResponseDelay)
+	httpRequestBytes, err := http_proxy.NewInnerRequest(http.MethodGet, path, "", nil)
 	if err != nil {
-		s.log.Errorf("http.NewRequest failed: %s", err)
+		s.log.Errorf("http_proxy.NewInnerRequest failed: %s", err)
 		return
 	}
-	buf := new(bytes.Buffer)
-	req.Write(buf)
-	httpRequestBytes := buf.Bytes()
 
 	var stats probeStats
 	for {

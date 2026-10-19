@@ -10,6 +10,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -292,5 +294,79 @@ func TestHealthReportsTheStampedVersion(t *testing.T) {
 	json.NewDecoder(serve(h, httptest.NewRequest(http.MethodGet, healthPath, nil)).Body).Decode(&b)
 	if b["version"] != "v0.0.0-test" {
 		t.Errorf("version = %q, want v0.0.0-test", b["version"])
+	}
+}
+
+// browserRequest is a request to path as a browser sends it: with headers
+// that identify the browser and the page, none of which the exit needs.
+func browserRequest(path, body string) *http.Request {
+	r := httptest.NewRequest(http.MethodPost, "http://localhost:7070"+path+"?trace=1", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json; charset=utf-8")
+	for k, v := range map[string]string{
+		"User-Agent":      "Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0",
+		"Accept":          "*/*",
+		"Accept-Language": "en-US,en;q=0.5",
+		"Accept-Encoding": "gzip, deflate, br, zstd",
+		"Sec-Fetch-Dest":  "empty",
+		"Sec-Fetch-Mode":  "cors",
+		"Sec-Fetch-Site":  "cross-site",
+		"Origin":          "https://dapp.example",
+		"Referer":         "https://dapp.example/swap",
+		"Cookie":          "session=abc",
+		"Authorization":   "Bearer token",
+		"Connection":      "keep-alive",
+	} {
+		r.Header.Set(k, v)
+	}
+	return r
+}
+
+// checkInner asserts the inner request sent is exactly the allow-list: path,
+// Host "nowhere", Content-Type and Content-Length, and the body byte for byte.
+func checkInner(t *testing.T, sent []sentTo, path, body string) {
+	t.Helper()
+	if len(sent) != 1 {
+		t.Fatalf("sent %d requests, want 1", len(sent))
+	}
+	r, err := http_proxy.ReadInnerRequest(sent[0].request)
+	if err != nil {
+		t.Fatalf("the exit would refuse the inner request: %s\n%s", err, sent[0].request)
+	}
+	if r.Method != http.MethodPost || r.RequestURI != path || r.Host != http_proxy.InnerHost {
+		t.Errorf("request line = %s %s, Host %s; want POST %s, Host %s", r.Method, r.RequestURI, r.Host, path, http_proxy.InnerHost)
+	}
+	want := http.Header{
+		"Content-Type":   {"application/json; charset=utf-8"},
+		"Content-Length": {strconv.Itoa(len(body))},
+	}
+	if !reflect.DeepEqual(r.Header, want) {
+		t.Errorf("inner headers = %v, want %v", r.Header, want)
+	}
+	if got, _ := io.ReadAll(r.Body); string(got) != body {
+		t.Errorf("inner body = %q, want %q", got, body)
+	}
+}
+
+// The body carries format verbs and a CRLF: it must reach the exit byte-exact.
+const browserBody = "{\"jsonrpc\":\"2.0\",\"id\":1,\r\n\"method\":\"eth_chainId\",\"params\":[\"%s\"]}"
+
+func TestBrowserHeadersNeverReachTheExit(t *testing.T) {
+	h, sent := recordingServer(t)
+	if resp := serve(h, browserRequest("/ethereum", browserBody)); resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	checkInner(t, *sent, "/ethereum", browserBody)
+}
+
+func TestBrowserHeadersNeverReachTheExitOnTheUserURLPath(t *testing.T) {
+	h, sent := recordingServer(t)
+	r := browserRequest(http_proxy.UserURLPath, browserBody)
+	r.Header.Set(http_proxy.URLHeader, "https://rpc.example/v3/secret")
+	if resp := serve(h, r); resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	checkInner(t, *sent, http_proxy.UserURLPath, browserBody)
+	if (*sent)[0].userURL != "https://rpc.example/v3/secret" {
+		t.Errorf("userURL = %q", (*sent)[0].userURL)
 	}
 }
