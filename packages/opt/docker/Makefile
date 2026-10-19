@@ -63,9 +63,13 @@ docker_args=--user ${docker_user} --volume $(kp_dir):/go/katzenpost --workdir /g
 mount_net_name=-v $(kp_docker_dir)/$(net_name):/$(net_name)
 
 ### local
-# ldflags for our binaries: upstream's ldflags_body plus the compression flag.
-# Not named ldflags, which would override upstream's (and its BuildVersion stamp).
-opt_ldflags="-extldflags=-Wl,-z,stack-size=0x1F40000 -buildid= -X github.com/ZeroKnowledgeNetwork/opt/common.CompressionEnabled=${compression}"
+# ldflags for our binaries: upstream's ldflags_body plus the compression flag
+# and the version. Not named ldflags, which would override upstream's (and its
+# BuildVersion stamp). The version is taken on the host: the build container
+# mounts only this module, without the repository's .git, so Go has no VCS
+# metadata to stamp.
+opt_version:=$(shell git -C .. describe --tags --always --dirty 2>/dev/null)
+opt_ldflags="-extldflags=-Wl,-z,stack-size=0x1F40000 -buildid= -X github.com/ZeroKnowledgeNetwork/opt/common.CompressionEnabled=${compression} -X main.version=${opt_version}"
 kp_dir=$(shell readlink -f $(katzenpost_dir))
 kp_docker_dir=$(kp_dir)/docker
 # What our binaries build from: every Go source in this module plus go.mod and
@@ -140,7 +144,15 @@ $(net_dir)/http_proxy.$(distro): $(katzenpost_dir)/docker/$(distro)_base.stamp $
 	$(docker_run_sh) 'cd /go/opt/server_plugins/cbor_plugins/http_proxy/cmd/http_proxy ; go build -trimpath -ldflags ${opt_ldflags} && mv http_proxy /$(net_name)/http_proxy.$(distro)'
 	cp ../server_plugins/cbor_plugins/http_proxy/http_proxy_config.toml $(net_dir)/servicenode1/
 
-$(net_dir)/walletshield.$(distro): $(katzenpost_dir)/docker/$(distro)_base.stamp $(opt_go_sources) | $(net_name) $(cache_dir)
+# Holds the version the binaries were last built at, so a new commit rebuilds
+# walletshield (whose /_/health reports it) even when no source changed.
+$(net_dir)/opt_version.stamp: FORCE | $(net_name)
+	@echo '$(opt_version)' | cmp -s - $@ || echo '$(opt_version)' > $@
+
+.PHONY: FORCE
+FORCE:
+
+$(net_dir)/walletshield.$(distro): $(katzenpost_dir)/docker/$(distro)_base.stamp $(opt_go_sources) $(net_dir)/opt_version.stamp | $(net_name) $(cache_dir)
 	$(docker_run_sh) 'cd /go/opt/apps/walletshield ; go build -trimpath -ldflags ${opt_ldflags} && mv walletshield /$(net_name)/walletshield.$(distro)'
 
 .PHONY: walletshield-probe
@@ -158,10 +170,13 @@ walletshield-probe-full: $(net_dir)/walletshield.$(distro) $(net_dir)/running.st
 	$(docker) run --network=$$net $(docker_args) $(mount_net_name) --rm katzenpost-$(distro)_base \
 		/$(net_name)/walletshield.$(distro) -config /$(net_name)/client/client.toml --listen_client :64333 -log_level DEBUG -probe --probe_count 3
 
+# walletshield-start's log level: DEBUG or INFO (what the shipped clients run)
+ws_log_level?=DEBUG
+
 .PHONY: walletshield-start
 walletshield-start: $(net_dir)/walletshield.$(distro) $(net_dir)/running.stamp | $(cache_dir)
 	$(docker) run -d --network=host $(docker_args) $(mount_net_name) --name walletshield katzenpost-$(distro)_base \
-		/$(net_name)/walletshield.$(distro) -config /$(net_name)/client/thinclient.toml -thin -listen :7070 -log_level DEBUG
+		/$(net_name)/walletshield.$(distro) -config /$(net_name)/client/thinclient.toml -thin -listen :7070 -log_level $(ws_log_level)
 
 .PHONY: walletshield-logs
 walletshield-logs:

@@ -29,6 +29,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
+        with:
+          # git describe needs the tags and the history between them
+          fetch-depth: 0
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -61,12 +64,18 @@ jobs:
       - name: Set source build date from git commit timestamp
         run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> $GITHUB_ENV
 
+      # the version walletshield reports: the build context has no .git to
+      # stamp it from
+      - name: Set the build version from git describe
+        run: echo "VERSION=$(git describe --tags --always --dirty)" >> "$GITHUB_ENV"
+
       - name: Build and export to Docker
         uses: docker/build-push-action@v6
         env:
           DOCKER_BUILD_SUMMARY: false
         with:
           file: ./docker/node/Dockerfile
+          build-args: VERSION=${{ env.VERSION }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           tags: ${{ env.IMAGE_TEST }}:test
@@ -79,6 +88,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           file: ./docker/node/Dockerfile
+          build-args: VERSION=${{ env.VERSION }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64

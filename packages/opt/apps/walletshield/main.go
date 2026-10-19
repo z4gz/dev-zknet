@@ -48,6 +48,18 @@ var (
 	errTooLarge = errors.New("payload too large")
 )
 
+// version identifies the build: set with -ldflags "-X main.version=..." where
+// the build has no VCS metadata to stamp (a docker build sees no .git).
+var version string
+
+// buildVersion is version, or the VCS stamp of a plain go build.
+func buildVersion() string {
+	if version != "" {
+		return version
+	}
+	return versioninfo.Short()
+}
+
 // healthPath is answered locally, without a mixnet round trip, so a client can
 // tell an absent WalletShield from an unreachable mixnet.
 const healthPath = "/_/health"
@@ -199,7 +211,7 @@ func main() {
 	if thinClientOnly {
 		mode = "thin"
 	}
-	mylog.Info("starting", "version", versioninfo.Short(), "mode", mode, "log", level)
+	mylog.Info("starting", "version", buildVersion(), "mode", mode, "log", level)
 
 	if delayStart > 0 {
 		d := rand.NewMath().Intn(delayStart)
@@ -404,7 +416,7 @@ func (s *Server) Handler(w http.ResponseWriter, req *http.Request) {
 	start := time.Now()
 
 	if req.Method == http.MethodGet && req.URL.Path == healthPath {
-		writeJSON(w, http.StatusOK, map[string]string{"version": versioninfo.Short()})
+		writeJSON(w, http.StatusOK, map[string]string{"version": buildVersion()})
 		return
 	}
 

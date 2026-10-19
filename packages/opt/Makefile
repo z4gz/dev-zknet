@@ -1,5 +1,7 @@
 compression?=true
-ldflags="-X github.com/ZeroKnowledgeNetwork/opt/common.CompressionEnabled=${compression}"
+# the build's version, reported by walletshield's /_/health
+opt_version?=$(shell git describe --tags --always --dirty 2>/dev/null)
+ldflags="-X github.com/ZeroKnowledgeNetwork/opt/common.CompressionEnabled=${compression} -X main.version=${opt_version}"
 
 .PHONY: all app-walletshield genconfig http_proxy pki clean
 

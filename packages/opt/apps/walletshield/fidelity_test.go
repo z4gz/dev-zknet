@@ -282,3 +282,15 @@ func TestUserURLPathWithoutHeaderIsRefusedLocally(t *testing.T) {
 		t.Errorf("sent %d requests, want 0", len(*sent))
 	}
 }
+
+// A version stamped with -X main.version wins over the VCS stamp.
+func TestHealthReportsTheStampedVersion(t *testing.T) {
+	defer func(v string) { version = v }(version)
+	version = "v0.0.0-test"
+	h, _ := replyServer(func() ([]byte, error) { return nil, errors.New("mixnet down") })
+	var b map[string]string
+	json.NewDecoder(serve(h, httptest.NewRequest(http.MethodGet, healthPath, nil)).Body).Decode(&b)
+	if b["version"] != "v0.0.0-test" {
+		t.Errorf("version = %q, want v0.0.0-test", b["version"])
+	}
+}
