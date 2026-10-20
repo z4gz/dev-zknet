@@ -1,0 +1,92 @@
+# Distribution builds of the committed HEAD, on the Woodpecker docker backend.
+# One definition serves both rungs: a tag event selects each Nx `dist` target's
+# `release` configuration (see `rung` in lib.sh) and enables the release-only
+# steps; any other event builds `dev`. Outputs land in dist/woodpecker/.
+# See .woodpecker/README.md.
+
+when:
+  - event: [push, manual, tag]
+
+variables:
+  - &cache /var/tmp/zknet-woodpecker:/cache
+
+steps:
+  prepare:
+    image: ghcr.io/rust-cross/cargo-zigbuild:0.23.4
+    volumes: [*cache]
+    commands:
+      - . "$CI_WORKSPACE/.woodpecker/lib.sh"
+      - tools node
+      - checkout
+      - pnpm_install
+
+  walletshield:
+    image: ghcr.io/goreleaser/goreleaser-cross:v1.27.3
+    depends_on: [prepare]
+    volumes: [*cache]
+    commands:
+      - . "$CI_WORKSPACE/.woodpecker/lib.sh"
+      - tools node zig upx
+      - cd "$SRC"
+      - pnpm exec nx run walletshield:dist:$(rung)
+
+  cli:
+    image: ghcr.io/rust-cross/cargo-zigbuild:0.23.4
+    depends_on: [prepare]
+    volumes: [*cache]
+    commands:
+      - . "$CI_WORKSPACE/.woodpecker/lib.sh"
+      # the image's rustup proxies, with RUSTUP_HOME on the cache volume
+      - export PATH=/usr/local/cargo/bin:$PATH
+      - tools node upx
+      - cd "$SRC"
+      - pnpm exec nx run zknet_client_cli:dist:$(rung)
+
+  desktop:
+    image: ubuntu:24.04
+    depends_on: [prepare]
+    volumes: [*cache]
+    commands:
+      - . "$CI_WORKSPACE/.woodpecker/lib.sh"
+      - apt_install ca-certificates curl git xz-utils build-essential pkg-config file libwebkit2gtk-4.1-dev
+      - tools node rust
+      - cd "$SRC"
+      # the release rung signs the updater artifacts; fail before building
+      - '[ "$(rung)" = dev ] || [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] || { echo "desktop: the release rung needs TAURI_SIGNING_PRIVATE_KEY"; exit 1; }'
+      - pnpm exec nx run @zknet/client:desktop-build:$(rung)
+
+  # --- release rung only: stubs until signing and publishing are decided ----
+
+  sign:
+    image: alpine:latest
+    depends_on: [walletshield, cli, desktop]
+    when:
+      - event: tag
+    commands:
+      - 'echo "sign: not configured yet (macOS notarization, Windows code signing)"'
+
+  publish:
+    image: alpine:latest
+    depends_on: [sign]
+    when:
+      - event: tag
+    commands:
+      - 'echo "publish: not configured yet (release repository and notes)"'
+
+  # --- always: hand the outputs to the host user -----------------------------
+
+  collect:
+    image: alpine:latest
+    depends_on: [walletshield, cli, desktop]
+    volumes: [*cache]
+    when:
+      - status: [success, failure]
+    commands:
+      - out=$CI_WORKSPACE/dist/woodpecker
+      - rm -rf "$out" && mkdir -p "$out"
+      - cd /cache/src/dist
+      - for d in walletshield zknet_client_cli; do [ ! -d $d ] || cp -a $d "$out/"; done
+      - for p in target/*/bundle/*/*.deb target/*/bundle/*/*.rpm target/*/bundle/*/*.AppImage; do [ ! -f $p ] || { mkdir -p "$out/zkn-client" && cp -a $p "$out/zkn-client/"; }; done
+      - owner=$(stat -c %u:%g "$CI_WORKSPACE")
+      - chown "$owner" "$CI_WORKSPACE/dist" && chown -R "$owner" "$out"
+      - ls -R "$out" | head -60

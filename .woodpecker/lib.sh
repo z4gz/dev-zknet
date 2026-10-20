@@ -11,11 +11,15 @@ export SRC=$CACHE/src
 
 export GOMODCACHE=$CACHE/go/mod GOCACHE=$CACHE/go/build GOTOOLCHAIN=local
 export RUSTUP_HOME=$CACHE/rustup CARGO_HOME=$CACHE/cargo
+# incremental state pays off only in local edit loops, and it grows the target directory
+export CARGO_INCREMENTAL=0
 export COREPACK_HOME=$CACHE/corepack COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 export ZIG_GLOBAL_CACHE_DIR=$CACHE/zig
 # Tauri's bundler keeps its downloaded tools (linuxdeploy, AppImage runtime) here
 export XDG_CACHE_HOME=$CACHE/xdg
 export NX_DAEMON=false NX_NO_CLOUD=true NX_TUI=false
+# Woodpecker sets CI=woodpecker; the Tauri CLI (2.12) accepts only a boolean
+export CI=true
 
 # --- toolchains -------------------------------------------------------------
 
@@ -125,6 +129,10 @@ checkout() {
   git -C "$SRC" fetch -q --force --tags "$CI_WORKSPACE" HEAD
   git -C "$SRC" checkout -q --force --detach FETCH_HEAD
   git -C "$SRC" clean -q -ffdx -e node_modules -e '/dist/target*'
+  # bundles are outputs of this run only, not build state
+  rm -rf "$SRC"/dist/target/*/bundle
+  # a server's clone has an origin, and goreleaser's release (not snapshot) needs one
+  git -C "$SRC" remote add origin "$CI_WORKSPACE" 2>/dev/null || git -C "$SRC" remote set-url origin "$CI_WORKSPACE"
   echo "checkout: $(git -C "$SRC" describe --tags --always --long) at $SRC"
 }
 
