@@ -1,0 +1,88 @@
+# WalletShield distribution builds, goreleaser OSS v2. Run through the Nx
+# target `walletshield:dist` (dev: `build --snapshot`; release: `release`)
+# inside ghcr.io/goreleaser/goreleaser-cross, which carries the darwin
+# (osxcross) and windows (mingw) C toolchains; served.sh then exports the
+# client download layout with checksums. The Linux ids link with zig against
+# the glibc of the oldest supported Ubuntu LTS as the floor, currently 2.31
+# (the `.2.31` targets below); zig and upx come from .woodpecker/lib.sh.
+version: 2
+
+project_name: walletshield
+dist: ../../dist/walletshield
+
+env:
+  - CGO_ENABLED=1
+
+snapshot:
+  # the stamp a plain `make app-walletshield` gives: `git describe`
+  version_template: "{{ .Summary }}"
+
+builds:
+  - &build
+    id: linux-amd64
+    main: ./apps/walletshield
+    binary: walletshield
+    goos: [linux]
+    goarch: [amd64]
+    env:
+      - CC=zig cc -target x86_64-linux-gnu.2.31
+      - CXX=zig c++ -target x86_64-linux-gnu.2.31
+      # the vendored sqisign Rust staticlib (linux/amd64 only) needs an unwinder
+      - CGO_LDFLAGS=-lunwind
+    flags: [-trimpath]
+    ldflags: ["-s -w -X main.version={{ .Version }}"]
+    mod_timestamp: "{{ .CommitTimestamp }}"
+  - <<: *build
+    id: linux-arm64
+    goarch: [arm64]
+    env:
+      - CC=zig cc -target aarch64-linux-gnu.2.31
+      - CXX=zig c++ -target aarch64-linux-gnu.2.31
+      # replaces Go's default `-g -O2`: zig honours a -g that follows -s, which
+      # would keep the debug info (linux-amd64 replaces it with -lunwind)
+      - CGO_LDFLAGS=-O2
+  - <<: *build
+    id: darwin-amd64
+    goos: [darwin]
+    env: [CC=o64-clang, CXX=o64-clang++]
+  - <<: *build
+    id: darwin-arm64
+    goos: [darwin]
+    goarch: [arm64]
+    env: [CC=oa64-clang, CXX=oa64-clang++]
+  - <<: *build
+    id: windows-amd64
+    goos: [windows]
+    env: [CC=x86_64-w64-mingw32-gcc, CXX=x86_64-w64-mingw32-g++]
+
+universal_binaries:
+  - id: darwin-universal
+    ids: [darwin-amd64, darwin-arm64]
+    replace: true
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+# UPX 5.2.1 refuses macOS binaries, so darwin stays unpacked
+upx:
+  - enabled: true
+    ids: [linux-amd64, linux-arm64, windows-amd64]
+    compress: best
+    lzma: true
+
+# --- release rung only (`goreleaser release`) --------------------------------
+
+archives:
+  - ids: [linux-amd64, linux-arm64, darwin-universal, windows-amd64]
+    formats: [tar.xz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files: [LICENSE]
+
+checksum:
+  algorithm: sha256
+
+# Not decided yet: the repository that hosts releases, and the release notes.
+release:
+  disable: true
+changelog:
+  disable: true

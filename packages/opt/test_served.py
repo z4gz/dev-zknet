@@ -1,0 +1,82 @@
+"""served.sh: the dist export in the clients' download layout, and its contract."""
+
+import re
+import shutil
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+WORKSPACE = HERE.parents[1]
+SERVED_SH = HERE / 'served.sh'
+
+BUILDS = {  # a goreleaser dist: build directory -> binary
+    'linux-amd64_linux_amd64_v1': 'walletshield',
+    'linux-arm64_linux_arm64_v8.0': 'walletshield',
+    'darwin-amd64_darwin_amd64_v1': 'walletshield',
+    'darwin-arm64_darwin_arm64_v8.0': 'walletshield',
+    'darwin-universal_darwin_all': 'walletshield',
+    'windows-amd64_windows_amd64_v1': 'walletshield.exe',
+}
+
+
+def platforms() -> dict[str, str]:
+    """served.sh's map: goreleaser build id -> client platform name."""
+    block = re.search(r'^platforms=\((.*?)^\)', SERVED_SH.read_text(), re.M | re.S).group(1)
+    return dict(line.split('=') for line in block.split())
+
+
+class ServedTest(unittest.TestCase):
+    def setUp(self):
+        self.dist = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.dist)
+        for build, binary in BUILDS.items():
+            (self.dist / build).mkdir()
+            (self.dist / build / binary).write_text(build)
+
+    def served(self):
+        return subprocess.run([SERVED_SH, self.dist], capture_output=True, text=True)
+
+    def test_exports_every_client_platform_with_checksums(self):
+        self.assertEqual(self.served().returncode, 0)
+        served = self.dist / 'served'
+        self.assertEqual(sorted(p.name for p in served.iterdir()), [
+            'checksums.txt', 'walletshield-linux-arm64', 'walletshield-linux-x64',
+            'walletshield-macos', 'walletshield-windows-x64',
+        ])
+        self.assertEqual((served / 'walletshield-macos').read_text(), 'darwin-universal_darwin_all')
+        self.assertEqual((served / 'walletshield-windows-x64').read_text(), 'windows-amd64_windows_amd64_v1')
+        check = subprocess.run(['sha256sum', '-c', 'checksums.txt'], cwd=served, capture_output=True, text=True)
+        self.assertEqual(check.returncode, 0, check.stdout)
+        self.assertEqual(len(check.stdout.splitlines()), 4)
+
+    def test_replaces_a_previous_export(self):
+        self.served()
+        (self.dist / 'served' / 'walletshield-freebsd-x64').write_text('stale')
+        self.served()
+        self.assertFalse((self.dist / 'served' / 'walletshield-freebsd-x64').exists())
+
+    def test_fails_without_a_build_for_a_platform(self):
+        shutil.rmtree(self.dist / 'windows-amd64_windows_amd64_v1')
+        result = self.served()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('one WalletShield build for windows-amd64', result.stderr)
+
+
+class ContractTest(unittest.TestCase):
+    def test_platform_names_match_the_clients(self):
+        desktop = (WORKSPACE / 'apps/client/src/utils/index.ts').read_text()
+        rust = (WORKSPACE / 'libs/rs-core/src/utils.rs').read_text()
+        names = set(platforms().values())
+        self.assertEqual(set(re.findall(r"return '([a-z0-9-]+)';", desktop)), names)
+        self.assertEqual(set(re.findall(r'Ok\("([a-z0-9-]+)"\.into\(\)\)', rust.split('#[cfg(test)]')[0])), names)
+
+    def test_platforms_are_goreleaser_build_ids(self):
+        config = (HERE / '.goreleaser.yaml').read_text()
+        builds = set(re.findall(r'^\s+(?:- )?(?:&\w+\s+)?id: ([\w-]+)$', config, re.M))
+        self.assertLessEqual(set(platforms()), builds)
+
+
+if __name__ == '__main__':
+    unittest.main()

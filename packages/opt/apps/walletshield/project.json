@@ -7,10 +7,23 @@
     "test": {
       "executor": "nx:run-commands",
       "cache": true,
-      "inputs": ["{projectRoot}/**/*.go", "^default", "optModule"],
+      "inputs": [
+        "{projectRoot}/**/*.go",
+        "^default",
+        "optModule",
+        "{workspaceRoot}/packages/opt/served.sh",
+        "{workspaceRoot}/packages/opt/test_served.py",
+        "{workspaceRoot}/packages/opt/.goreleaser.yaml",
+        "{workspaceRoot}/apps/client/src/utils/index.ts",
+        "{workspaceRoot}/libs/rs-core/src/utils.rs"
+      ],
       "options": {
-        "command": "go test ./...",
-        "cwd": "{projectRoot}"
+        "commands": [
+          "go test ./...",
+          "python3 -B -m unittest discover -s ../.. -p test_served.py"
+        ],
+        "cwd": "{projectRoot}",
+        "parallel": false
       }
     },
     "build": {
@@ -30,6 +43,23 @@
       "options": {
         "command": "./walletshield -config \"${remote_client_config:?set remote_client_config=/path/to/client.toml}\" -listen \"${ws_listen:-:7070}\" -log_level ${log_level:-DEBUG} ${ws_extra_flags:-}",
         "cwd": "{projectRoot}"
+      }
+    },
+    "dist": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "outputs": ["{workspaceRoot}/dist/walletshield"],
+      "options": {
+        "cwd": "packages/opt"
+      },
+      "defaultConfiguration": "dev",
+      "configurations": {
+        "dev": {
+          "command": "goreleaser build --snapshot --clean && ./served.sh"
+        },
+        "release": {
+          "command": "goreleaser release --clean --skip=publish && ./served.sh"
+        }
       }
     }
   }

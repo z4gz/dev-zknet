@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Export a WalletShield goreleaser dist in the layout the clients download:
+# served/walletshield-<platform> for every client platform, and
+# served/checksums.txt, their sha256. Chained after goreleaser in both rungs of
+# the Nx target `walletshield:dist`.
+#
+#   served.sh [DIST]    DIST: the goreleaser dist (default: the workspace's dist/walletshield)
+set -euo pipefail
+shopt -s nullglob
+
+# goreleaser build id (.goreleaser.yaml) = client platform name
+# (getPlatformArch in apps/client, map_platform_arch in libs/rs-core)
+platforms=(
+  linux-amd64=linux-x64
+  linux-arm64=linux-arm64
+  darwin-universal=macos
+  windows-amd64=windows-x64
+)
+
+dist=${1:-$(dirname "$0")/../../dist/walletshield}
+served=$dist/served
+rm -rf "$served"
+mkdir "$served"
+for platform in "${platforms[@]}"; do
+  id=${platform%%=*}
+  # goreleaser builds into <id>_<os>_<arch>[_<variant>]/walletshield[.exe]
+  binaries=("$dist/${id}"_*/walletshield*)
+  if [ ${#binaries[@]} != 1 ]; then
+    echo "served.sh: expected one WalletShield build for $id in $dist, found ${#binaries[@]}" >&2
+    exit 1
+  fi
+  cp -p "${binaries[0]}" "$served/walletshield-${platform#*=}"
+done
+(cd "$served" && sha256sum walletshield-* >checksums.txt)
+echo "served.sh: $served"
