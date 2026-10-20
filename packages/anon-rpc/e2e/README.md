@@ -162,7 +162,7 @@ For a human with a running ZKNet dev mixnet. Nothing here starts one.
 
 1. Start the mixnet and a WalletShield as usual (root README, _Run the local mixnet_ and _Run the
    clients locally_), and note WalletShield's `-listen` address. `docker/Makefile` rebuilds
-   `http_proxy.alpine` and `walletshield.alpine` when their Go sources change; a running mix
+   `rpc_proxy.alpine` and `walletshield.alpine` when their Go sources change; a running mix
    picks the new exit up only after `mixnet:stop` and `mixnet:start`.
 2. Run:
 
@@ -177,7 +177,7 @@ For a human with a running ZKNet dev mixnet. Nothing here starts one.
    and prints each result:
    - **mix round-trip time**: min, p50, p90 and max over the exit probes;
    - **the upstream-timeout tripwire**: an exit probe delayed 3 s, just under the exit's 3.5 s
-     upstream timeout (`http_proxy/limits.go`), must still come back. The katzenpost client drops
+     upstream timeout (`rpc_proxy/limits.go`), must still come back. The katzenpost client drops
      a reply later than its encoded round trip plus 4.5 s (3 layers), so this fails if the
      timeout outgrows that window;
    - **per chain**, `eth_chainId` through the demo's public provider URL and through

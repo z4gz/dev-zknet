@@ -3,7 +3,7 @@
 // exit's reply back.
 //
 // Named by peer, not by protocol. Every implementation ends at the same exit
-// service (`http_proxy`), which takes a serialized HTTP request and either
+// service (`rpc_proxy`), which takes a serialized HTTP request and either
 // uses its path as a key into the operator's `[Networks]` map or fetches the
 // provider URL the user chose, and relays the upstream status, an
 // allowlisted set of headers and the body. The seam carries exactly that — a

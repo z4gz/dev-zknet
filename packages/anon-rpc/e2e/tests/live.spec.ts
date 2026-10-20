@@ -103,7 +103,7 @@ test('mix round-trip time', async () => {
   expect(ms.length).toBeGreaterThan(0);
 });
 
-// Tripwire for the exit's upstream timeout (http_proxy/limits.go): an
+// Tripwire for the exit's upstream timeout (rpc_proxy/limits.go): an
 // exit-side delay just under it must still come back. The katzenpost client
 // drops a reply later than the encoded round trip + 4.5 s (3 layers); if
 // UpstreamTimeout outgrows that window, or the window shrinks, this fails.

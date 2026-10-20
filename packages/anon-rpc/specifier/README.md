@@ -249,7 +249,7 @@ from the top-level fields, with `updates` missing or empty.
    live address, by pull request against that file, when the address changes (a `setWorker` keeps
    it).
 6. **The exit's network routes** — only if the worker should reach a network the exit does not yet
-   route (`http_proxy_config.toml`).
+   route (`rpc_proxy_config.toml`).
 
 ## Reproducibility
 

@@ -1,5 +1,5 @@
 // The worker's limits, in one place. They match the exit's own
-// (`http_proxy/limits.go`), so a request the exit would refuse for its size
+// (`rpc_proxy/limits.go`), so a request the exit would refuse for its size
 // is refused here, before it costs a mixnet round trip.
 
 /** Largest request body the worker sends, in bytes (the exit's `MaxRequestBodyBytes`). */

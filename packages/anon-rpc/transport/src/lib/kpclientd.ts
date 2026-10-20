@@ -5,12 +5,12 @@
 // the same AppID (and its queued replies) across reconnects.
 //
 // The request it sends is the same one WalletShield sends: the inner request,
-// compressed, CBOR-wrapped as `http_proxy.Request`, addressed to the
-// `http_proxy` service from the PKI document. So it implements the same
+// compressed, CBOR-wrapped as `rpc_proxy.Request`, addressed to the
+// `rpc_proxy` service from the PKI document. So it implements the same
 // ExitRequest → ExitResponse contract. The inner request is built afresh from
 // method, path, Content-Type and body, never the caller's own request; its
 // contract, and the exit's refusal of anything else, is documented in
-// packages/opt/server_plugins/cbor_plugins/http_proxy/request.go.
+// packages/opt/server_plugins/cbor_plugins/rpc_proxy/request.go.
 //
 // STUB — this session ships the signature only.
 

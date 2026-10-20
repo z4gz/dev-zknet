@@ -1,6 +1,6 @@
 // WalletShieldTransport: the minimal path. WalletShield is the ZKNet client's
 // local HTTP listener; it serializes the request it receives, sends it
-// through the mixnet to the `http_proxy` exit, and answers with the exit's
+// through the mixnet to the `rpc_proxy` exit, and answers with the exit's
 // relay of the upstream reply.
 //
 // The reply contract (WalletShield + exit, shared with this transport):

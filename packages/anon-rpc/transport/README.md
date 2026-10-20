@@ -1,7 +1,7 @@
 # @zknet/anon-rpc-transport
 
 This package is the seam between the ZKNet anon-rpc worker and the local ZKNet
-peer that carries a request through the mixnet to the `http_proxy` exit. It is
+peer that carries a request through the mixnet to the `rpc_proxy` exit. It is
 named after the peer it talks to, not the protocol:
 
 - **`WalletShieldTransport`** sends HTTP to WalletShield's listener. This is
