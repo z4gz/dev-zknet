@@ -28,8 +28,19 @@
       "executor": "nx:run-commands",
       "cache": false,
       "options": {
-        "command": "pnpm tauri build",
         "cwd": "{projectRoot}"
+      },
+      "defaultConfiguration": "dev",
+      "configurations": {
+        "dev": {
+          "command": "pnpm tauri build --debug --config src-tauri/tauri.dev-local.conf.json --config src-tauri/tauri.dist-dev.conf.json",
+          "env": {
+            "CARGO_PROFILE_DEV_STRIP": "debuginfo"
+          }
+        },
+        "release": {
+          "command": "pnpm tauri build"
+        }
       }
     }
   }
