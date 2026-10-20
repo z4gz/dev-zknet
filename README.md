@@ -78,6 +78,15 @@ pnpm nx affected -t build,test       # only what a change touches
 pnpm nx run walletshield:build
 ```
 
+CI checks and distribution builds (WalletShield and the CLI for four platforms,
+the Linux desktop bundles) run locally on Woodpecker; see
+[`.woodpecker/README.md`](.woodpecker/README.md):
+
+```sh
+woodpecker-cli exec --local --backend-engine docker --repo-trusted-volumes .woodpecker/ci.yaml
+woodpecker-cli exec --local --backend-engine docker --repo-trusted-volumes .woodpecker/dist.yaml
+```
+
 ## Run the local mixnet
 
 Brings up a pinned local Katzenpost testnet (version read from `packages/opt/go.mod`),
