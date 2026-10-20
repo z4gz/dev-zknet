@@ -22,6 +22,20 @@
         "command": "cargo build --locked --target-dir dist/target -p zknet_client_cli"
       }
     },
+    "dist": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "outputs": ["{workspaceRoot}/dist/zknet_client_cli"],
+      "defaultConfiguration": "dev",
+      "configurations": {
+        "dev": {
+          "command": "sh apps/client-cli/scripts/dist.sh dev"
+        },
+        "release": {
+          "command": "sh apps/client-cli/scripts/dist.sh release"
+        }
+      }
+    },
     "test": {
       "executor": "nx:run-commands",
       "cache": true,
