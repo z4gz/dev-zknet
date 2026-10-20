@@ -337,8 +337,8 @@ func (s *katzenpost) genNodeConfig(identifier string, isGateway bool, isServiceN
 
 			// ZKN JSON-RPC proxy
 			rpcProxyCfg := &sConfig.CBORPluginKaetzchen{
-				Capability:     "http_proxy",
-				Endpoint:       "http_proxy",
+				Capability:     "rpc_proxy",
+				Endpoint:       "rpc_proxy",
 				Command:        s.binPrefix + "rpc_proxy" + s.binSuffix,
 				MaxConcurrency: 1,
 				Disable:        false,

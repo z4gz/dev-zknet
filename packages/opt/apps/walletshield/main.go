@@ -39,8 +39,8 @@ import (
 )
 
 var (
-	timeout          = 20 // (default) context timeout
-	ProxyHTTPService = "http_proxy"
+	timeout         = 20 // (default) context timeout
+	RPCProxyService = "rpc_proxy"
 
 	// Note: UserForwardPayloadLength should match the same value passed to genconfig.
 	UserForwardPayloadLength = 30000
@@ -111,7 +111,7 @@ func sendRequest(thin *thin.ThinClient, httpRequestBytes []byte, userURL string)
 	}
 
 	// Select a target service node and compute the DestinationIdHash
-	target, err := thin.GetService(ProxyHTTPService)
+	target, err := thin.GetService(RPCProxyService)
 	if err != nil {
 		return nil, fmt.Errorf("thin.GetService failed: %w", err)
 	}
@@ -322,9 +322,9 @@ func logMixnet(l *log.Logger, t *thin.ThinClient) {
 		l.Warn("connected to the client daemon, but it has no PKI document yet")
 		return
 	}
-	exits, _ := t.GetServices(ProxyHTTPService)
+	exits, _ := t.GetServices(RPCProxyService)
 	if len(exits) == 0 {
-		l.Warn("connected to the mixnet, but no exit offers "+ProxyHTTPService+"; requests will fail", "epoch", doc.Epoch)
+		l.Warn("connected to the mixnet, but no exit offers "+RPCProxyService+"; requests will fail", "epoch", doc.Epoch)
 		return
 	}
 	l.Info("connected to the mixnet", "epoch", doc.Epoch, "exits", len(exits))

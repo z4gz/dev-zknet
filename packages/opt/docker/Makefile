@@ -86,8 +86,8 @@ export
 
 define SERVICENODE_PLUGINS
   [[ServiceNode.CBORPluginKaetzchen]]
-    Capability = "http_proxy"
-    Endpoint = "http_proxy"
+    Capability = "rpc_proxy"
+    Endpoint = "rpc_proxy"
     Command = "/$(net_name)/rpc_proxy.$(distro)"
     MaxConcurrency = 1
     Disable = false
