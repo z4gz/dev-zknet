@@ -11,8 +11,8 @@ The pinned version in `go.mod` drives both the Go build and the local mixnet:
 `docker/Makefile` clones that tag into `$(katzenpost_dir)` (default
 `/tmp/katzenpost.opt`) and passes most targets through to its `docker/Makefile`.
 
-- **Hot path** (must work end to end): `apps/walletshield`, the `http_proxy` CBOR
-  plugin (`server_plugins/cbor_plugins/http_proxy`), `common`, and the
+- **Hot path** (must work end to end): `apps/walletshield`, the `rpc_proxy` CBOR
+  plugin (`server_plugins/cbor_plugins/rpc_proxy`), `common`, and the
   `docker/Makefile` wrapper.
 - **Legacy** (must build; only minimal, surgical changes): `genconfig/`, `pki/`,
   `docker/Makefile.appchain`, `docker/node/`, `docker/qemu-runner/`. Do not
@@ -63,7 +63,7 @@ Every variable in the wrapper is exported and passed with `make -e`, so it
   upstream Makefile, then bump the "Currently mirrored from" note in the header.
 - Re-check the `### local policy` topology against upstream's defaults: `mixes`
   must be at least `layers`, and `serviceNodes=1` because `custom-config` injects
-  `http_proxy` into `servicenode1` only.
+  `rpc_proxy` into `servicenode1` only.
 - Never define a variable here just to read one of upstream's (e.g.
   `compose_network_name`). Derive it in the recipe's shell instead; see
   `walletshield-probe-full`.
@@ -80,11 +80,11 @@ Every variable in the wrapper is exported and passed with `make -e`, so it
 ## 4. Verify
 
 ```sh
-pnpm nx run-many -t build,test -p walletshield http-proxy opt-common
+pnpm nx run-many -t build,test -p walletshield rpc-proxy opt-common
 make -C packages/opt all                  # also builds legacy genconfig + pki
 pnpm nx run mixnet:start                  # ~5 min cold
 pnpm nx run mixnet:ready                  # ~2-3 min
-pnpm nx run mixnet:probe                  # walletshield (thin) + http_proxy, no 3rd-party RPC
+pnpm nx run mixnet:probe                  # walletshield (thin) + rpc_proxy, no 3rd-party RPC
 make -C packages/opt/docker -e run-ping npings=5
 make -C packages/opt/docker -e walletshield-probe-full   # walletshield with embedded daemon
 pnpm nx run mixnet:serve
@@ -100,7 +100,7 @@ pnpm nx run mixnet:stop
 - Go 1.26.9. hpqc is now 0.0.93, quic-go 0.63.0.
 - CBOR plugin protocol 2: the mix server offers the plugin a socket path
   (`cborplugin.HostSocketPath`) and the Sphinx geometry (`cborplugin.HostInfo`),
-  and sends a `Request{IsParametersRequest: true}`. `http_proxy` speaks it: it
+  and sends a `Request{IsParametersRequest: true}`. `rpc_proxy` speaks it: it
   prints its socket path only under protocol 1, takes `UserForwardPayloadLength`
   from the host (logged at start, falling back to 30000), and answers the
   parameters request with an empty `NewParametersResponse`. In servicenode1's

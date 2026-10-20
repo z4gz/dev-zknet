@@ -1,7 +1,7 @@
 # zknetwork source
 
 ZKNetwork's [Nx](https://nx.dev) monorepo contains the `packages/opt` Go module:
-WalletShield, the `http_proxy` CBOR plugin, and the local Katzenpost mixnet tooling.
+WalletShield, the `rpc_proxy` CBOR plugin, and the local Katzenpost mixnet tooling.
 The projects below build and exercise the client → mixnet → RPC path.
 
 ```sh
@@ -13,19 +13,19 @@ pnpm nx show projects
 
 Four Nx projects define the active Go and Make workflows:
 
-| Project        | Root                                                  | Targets                                                                              |
-| -------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `opt-common`   | `packages/opt/common`                                 | `test`                                                                               |
-| `http-proxy`   | `packages/opt/server_plugins/cbor_plugins/http_proxy` | `build`                                                                              |
-| `walletshield` | `packages/opt/apps/walletshield`                      | `build`, `dev-remote`                                                                |
-| `mixnet`       | `packages/opt/docker`                                 | `start`, `ready`, `probe`, `serve`, `e2e-rpc`, `e2e-rpc-matrix`, `stop`, `dev-local` |
+| Project        | Root                                                 | Targets                                                                              |
+| -------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `opt-common`   | `packages/opt/common`                                | `test`                                                                               |
+| `rpc-proxy`    | `packages/opt/server_plugins/cbor_plugins/rpc_proxy` | `build`                                                                              |
+| `walletshield` | `packages/opt/apps/walletshield`                     | `build`, `dev-remote`                                                                |
+| `mixnet`       | `packages/opt/docker`                                | `start`, `ready`, `probe`, `serve`, `e2e-rpc`, `e2e-rpc-matrix`, `stop`, `dev-local` |
 
 The clients run against that mixnet through `network-assets` (`apps/network-assets`:
 `stage`, `serve`, `ready`, `test`), which assembles a network's assets in the clients' download
 layout and serves them to `zknet_client_cli:dev-local` and `@zknet/client:desktop-dev-local`.
 See [Run the clients locally](#run-the-clients-locally).
 
-`http-proxy` is one project for a library plus its `cmd/http_proxy` binary, not one per
+`rpc-proxy` is one project for a library plus its `cmd/rpc_proxy` binary, not one per
 file.
 
 The [anon-rpc](https://github.com/ethereum/anon-rpc) worker, which lets a wallet send RPC
@@ -45,7 +45,7 @@ Each has a README with the details.
 Every target is `nx:run-commands` around a recipe that already exists:
 
 - `opt-common:test` → `go test ./...` in `packages/opt/common`.
-- `http-proxy:build` → `make http_proxy` in `packages/opt` (the module `Makefile`,
+- `rpc-proxy:build` → `make rpc_proxy` in `packages/opt` (the module `Makefile`,
   which carries the `-ldflags -X …/common.CompressionEnabled` build flag).
 - `walletshield:build` → `make app-walletshield` in `packages/opt`.
 - every `mixnet:*` target → `make -e <target>` in `packages/opt/docker`, the thin
@@ -54,7 +54,7 @@ Every target is `nx:run-commands` around a recipe that already exists:
 
 There is no Go Nx plugin and no generated graph parser. Consequently the Go dependency
 edges are declared by hand with `implicitDependencies`
-(`walletshield → opt-common, http-proxy`; `http-proxy → opt-common`; `mixnet → all
+(`walletshield → opt-common, rpc-proxy`; `rpc-proxy → opt-common`; `mixnet → all
 three`) and must be updated if the Go imports change.
 
 ### Caching
@@ -81,7 +81,7 @@ pnpm nx run walletshield:build
 ## Run the local mixnet
 
 Brings up a pinned local Katzenpost testnet (version read from `packages/opt/go.mod`),
-injects the `http_proxy` plugin into its single service node, and runs WalletShield
+injects the `rpc_proxy` plugin into its single service node, and runs WalletShield
 against it.
 
 ```sh
