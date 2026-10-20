@@ -2,7 +2,7 @@
   "$schema": "../../../../node_modules/nx/schemas/project-schema.json",
   "name": "walletshield",
   "projectType": "application",
-  "implicitDependencies": ["opt-common", "http-proxy"],
+  "implicitDependencies": ["opt-common", "rpc-proxy"],
   "targets": {
     "test": {
       "executor": "nx:run-commands",

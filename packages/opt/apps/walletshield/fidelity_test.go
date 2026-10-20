@@ -19,7 +19,7 @@ import (
 	"github.com/fxamacker/cbor/v2"
 
 	"github.com/ZeroKnowledgeNetwork/opt/common"
-	"github.com/ZeroKnowledgeNetwork/opt/server_plugins/cbor_plugins/http_proxy"
+	"github.com/ZeroKnowledgeNetwork/opt/server_plugins/cbor_plugins/rpc_proxy"
 )
 
 // replyServer returns the CORS-wrapped handler whose (fake) mixnet answers
@@ -45,13 +45,13 @@ func exitReply(t *testing.T, status int, header http.Header, body string) func()
 		t.Fatal(err)
 	}
 	return func() ([]byte, error) {
-		return cbor.Marshal(&http_proxy.Response{Payload: payload, Status: status, Header: header})
+		return cbor.Marshal(&rpc_proxy.Response{Payload: payload, Status: status, Header: header})
 	}
 }
 
 func exitError(reason, msg string) func() ([]byte, error) {
 	return func() ([]byte, error) {
-		return cbor.Marshal(&http_proxy.Response{Error: msg, Reason: reason})
+		return cbor.Marshal(&rpc_proxy.Response{Error: msg, Reason: reason})
 	}
 }
 
@@ -68,8 +68,8 @@ func checkFailure(t *testing.T, resp *http.Response, reason string, status int) 
 	if resp.StatusCode != status {
 		t.Errorf("status = %d, want %d", resp.StatusCode, status)
 	}
-	if got := resp.Header.Get(http_proxy.ErrorHeader); got != reason {
-		t.Errorf("%s = %q, want %q", http_proxy.ErrorHeader, got, reason)
+	if got := resp.Header.Get(rpc_proxy.ErrorHeader); got != reason {
+		t.Errorf("%s = %q, want %q", rpc_proxy.ErrorHeader, got, reason)
 	}
 	if ct := resp.Header.Get("Content-Type"); ct != "application/json" {
 		t.Errorf("Content-Type = %q, want application/json", ct)
@@ -90,10 +90,10 @@ func TestUpstreamStatusHeadersAndBodyAreRelayed(t *testing.T) {
 	// The body carries format verbs: it must reach the client byte-exact.
 	const body = `{"error":"rate limited at 100%s %d %%"}`
 	upstream := http.Header{
-		"Content-Type":         {"text/plain; charset=utf-8"},
-		"Retry-After":          {"7"},
-		"Set-Cookie":           {"tracker=1"},
-		http_proxy.ErrorHeader: {"mix-timeout"},
+		"Content-Type":        {"text/plain; charset=utf-8"},
+		"Retry-After":         {"7"},
+		"Set-Cookie":          {"tracker=1"},
+		rpc_proxy.ErrorHeader: {"mix-timeout"},
 	}
 	h, _ := replyServer(exitReply(t, http.StatusTooManyRequests, upstream, body))
 	resp := serve(h, post("https://example.org"))
@@ -114,8 +114,8 @@ func TestUpstreamStatusHeadersAndBodyAreRelayed(t *testing.T) {
 	if v := resp.Header.Values("Set-Cookie"); len(v) != 0 {
 		t.Errorf("unlisted header relayed: Set-Cookie = %q", v)
 	}
-	if v, ok := resp.Header[http_proxy.ErrorHeader]; ok {
-		t.Errorf("upstream reply carries %s = %q", http_proxy.ErrorHeader, v)
+	if v, ok := resp.Header[rpc_proxy.ErrorHeader]; ok {
+		t.Errorf("upstream reply carries %s = %q", rpc_proxy.ErrorHeader, v)
 	}
 }
 
@@ -143,32 +143,32 @@ func TestFailuresAreMarked(t *testing.T) {
 		status int
 	}{
 		{"send fails", func() ([]byte, error) { return nil, errors.New("context deadline exceeded") },
-			http_proxy.ReasonMixTimeout, http.StatusGatewayTimeout},
+			rpc_proxy.ReasonMixTimeout, http.StatusGatewayTimeout},
 		{"request too large", func() ([]byte, error) { return nil, errTooLarge },
-			http_proxy.ReasonTooLarge, http.StatusRequestEntityTooLarge},
-		{"exit refused", exitError(http_proxy.ReasonExitRefused, "URI not configured in networks"),
-			http_proxy.ReasonExitRefused, http.StatusBadGateway},
-		{"upstream unreachable", exitError(http_proxy.ReasonUpstreamUnreachable, "HTTP request failed"),
-			http_proxy.ReasonUpstreamUnreachable, http.StatusBadGateway},
-		{"reply too large", exitError(http_proxy.ReasonTooLarge, "HTTP response is too big"),
-			http_proxy.ReasonTooLarge, http.StatusRequestEntityTooLarge},
-		{"exit busy", exitError(http_proxy.ReasonExitBusy, "the exit is serving its maximum number of requests"),
-			http_proxy.ReasonExitBusy, http.StatusServiceUnavailable},
+			rpc_proxy.ReasonTooLarge, http.StatusRequestEntityTooLarge},
+		{"exit refused", exitError(rpc_proxy.ReasonExitRefused, "URI not configured in networks"),
+			rpc_proxy.ReasonExitRefused, http.StatusBadGateway},
+		{"upstream unreachable", exitError(rpc_proxy.ReasonUpstreamUnreachable, "HTTP request failed"),
+			rpc_proxy.ReasonUpstreamUnreachable, http.StatusBadGateway},
+		{"reply too large", exitError(rpc_proxy.ReasonTooLarge, "HTTP response is too big"),
+			rpc_proxy.ReasonTooLarge, http.StatusRequestEntityTooLarge},
+		{"exit busy", exitError(rpc_proxy.ReasonExitBusy, "the exit is serving its maximum number of requests"),
+			rpc_proxy.ReasonExitBusy, http.StatusServiceUnavailable},
 		{"undecodable reply", func() ([]byte, error) { return []byte{0xff, 0x00}, nil },
-			http_proxy.ReasonBadReply, http.StatusBadGateway},
+			rpc_proxy.ReasonBadReply, http.StatusBadGateway},
 		{"empty reply", func() ([]byte, error) { return nil, nil },
-			http_proxy.ReasonBadReply, http.StatusBadGateway},
+			rpc_proxy.ReasonBadReply, http.StatusBadGateway},
 		{"undecompressable reply", func() ([]byte, error) {
-			return cbor.Marshal(&http_proxy.Response{Payload: []byte("not compressed"), Status: 200})
-		}, http_proxy.ReasonBadReply, http.StatusBadGateway},
+			return cbor.Marshal(&rpc_proxy.Response{Payload: []byte("not compressed"), Status: 200})
+		}, rpc_proxy.ReasonBadReply, http.StatusBadGateway},
 		{"invalid upstream status", exitReply(t, 42, nil, rpcReply),
-			http_proxy.ReasonBadReply, http.StatusBadGateway},
+			rpc_proxy.ReasonBadReply, http.StatusBadGateway},
 		{"no upstream status", exitReply(t, 0, nil, rpcReply),
-			http_proxy.ReasonBadReply, http.StatusBadGateway},
-		{"provider selection off", exitError(http_proxy.ReasonProviderSelectionOff, "this exit does not serve user-chosen provider URLs"),
-			http_proxy.ReasonProviderSelectionOff, http.StatusBadGateway},
+			rpc_proxy.ReasonBadReply, http.StatusBadGateway},
+		{"provider selection off", exitError(rpc_proxy.ReasonProviderSelectionOff, "this exit does not serve user-chosen provider URLs"),
+			rpc_proxy.ReasonProviderSelectionOff, http.StatusBadGateway},
 		{"unknown reason", exitError("from-the-future", "?"),
-			http_proxy.ReasonExitRefused, http.StatusBadGateway},
+			rpc_proxy.ReasonExitRefused, http.StatusBadGateway},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -252,9 +252,9 @@ func recordingServer(t *testing.T) (http.HandlerFunc, *[]sentTo) {
 
 func TestUserURLGoesInTheRequestNotTheHeader(t *testing.T) {
 	h, sent := recordingServer(t)
-	r := httptest.NewRequest(http.MethodPost, http_proxy.UserURLPath, strings.NewReader(`{}`))
+	r := httptest.NewRequest(http.MethodPost, rpc_proxy.UserURLPath, strings.NewReader(`{}`))
 	r.Header.Set("Content-Type", "application/json")
-	r.Header.Set(http_proxy.URLHeader, "https://rpc.example/v3/secret")
+	r.Header.Set(rpc_proxy.URLHeader, "https://rpc.example/v3/secret")
 	if resp := serve(h, r); resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
@@ -269,7 +269,7 @@ func TestUserURLGoesInTheRequestNotTheHeader(t *testing.T) {
 func TestURLHeaderIsIgnoredOffTheUserURLPath(t *testing.T) {
 	h, sent := recordingServer(t)
 	r := post("")
-	r.Header.Set(http_proxy.URLHeader, "https://rpc.example/v3/secret")
+	r.Header.Set(rpc_proxy.URLHeader, "https://rpc.example/v3/secret")
 	serve(h, r)
 	if len(*sent) != 1 || (*sent)[0].userURL != "" || bytes.Contains((*sent)[0].request, []byte("secret")) {
 		t.Errorf("a network-key request carried the URL: %+v", *sent)
@@ -278,8 +278,8 @@ func TestURLHeaderIsIgnoredOffTheUserURLPath(t *testing.T) {
 
 func TestUserURLPathWithoutHeaderIsRefusedLocally(t *testing.T) {
 	h, sent := recordingServer(t)
-	r := httptest.NewRequest(http.MethodPost, http_proxy.UserURLPath, strings.NewReader(`{}`))
-	checkFailure(t, serve(h, r), http_proxy.ReasonExitRefused, http.StatusBadGateway)
+	r := httptest.NewRequest(http.MethodPost, rpc_proxy.UserURLPath, strings.NewReader(`{}`))
+	checkFailure(t, serve(h, r), rpc_proxy.ReasonExitRefused, http.StatusBadGateway)
 	if len(*sent) != 0 {
 		t.Errorf("sent %d requests, want 0", len(*sent))
 	}
@@ -328,12 +328,12 @@ func checkInner(t *testing.T, sent []sentTo, path, body string) {
 	if len(sent) != 1 {
 		t.Fatalf("sent %d requests, want 1", len(sent))
 	}
-	r, err := http_proxy.ReadInnerRequest(sent[0].request)
+	r, err := rpc_proxy.ReadInnerRequest(sent[0].request)
 	if err != nil {
 		t.Fatalf("the exit would refuse the inner request: %s\n%s", err, sent[0].request)
 	}
-	if r.Method != http.MethodPost || r.RequestURI != path || r.Host != http_proxy.InnerHost {
-		t.Errorf("request line = %s %s, Host %s; want POST %s, Host %s", r.Method, r.RequestURI, r.Host, path, http_proxy.InnerHost)
+	if r.Method != http.MethodPost || r.RequestURI != path || r.Host != rpc_proxy.InnerHost {
+		t.Errorf("request line = %s %s, Host %s; want POST %s, Host %s", r.Method, r.RequestURI, r.Host, path, rpc_proxy.InnerHost)
 	}
 	want := http.Header{
 		"Content-Type":   {"application/json; charset=utf-8"},
@@ -360,12 +360,12 @@ func TestBrowserHeadersNeverReachTheExit(t *testing.T) {
 
 func TestBrowserHeadersNeverReachTheExitOnTheUserURLPath(t *testing.T) {
 	h, sent := recordingServer(t)
-	r := browserRequest(http_proxy.UserURLPath, browserBody)
-	r.Header.Set(http_proxy.URLHeader, "https://rpc.example/v3/secret")
+	r := browserRequest(rpc_proxy.UserURLPath, browserBody)
+	r.Header.Set(rpc_proxy.URLHeader, "https://rpc.example/v3/secret")
 	if resp := serve(h, r); resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
-	checkInner(t, *sent, http_proxy.UserURLPath, browserBody)
+	checkInner(t, *sent, rpc_proxy.UserURLPath, browserBody)
 	if (*sent)[0].userURL != "https://rpc.example/v3/secret" {
 		t.Errorf("userURL = %q", (*sent)[0].userURL)
 	}

@@ -335,22 +335,22 @@ func (s *katzenpost) genNodeConfig(identifier string, isGateway bool, isServiceN
 				s.hasProxy = true
 			}
 
-			// ZKN JSON RPC - HTTP Proxy
-			httpProxyCfg := &sConfig.CBORPluginKaetzchen{
+			// ZKN JSON-RPC proxy
+			rpcProxyCfg := &sConfig.CBORPluginKaetzchen{
 				Capability:     "http_proxy",
 				Endpoint:       "http_proxy",
-				Command:        s.binPrefix + "http_proxy" + s.binSuffix,
+				Command:        s.binPrefix + "rpc_proxy" + s.binSuffix,
 				MaxConcurrency: 1,
 				Disable:        false,
 				Config: map[string]interface{}{
-					"config":  s.baseDir + "/" + cfg.Server.Identifier + "/http_proxy_config.toml",
+					"config":  s.baseDir + "/" + cfg.Server.Identifier + "/rpc_proxy_config.toml",
 					"log_dir": s.baseDir + "/" + cfg.Server.Identifier,
 				},
 			}
-			cfg.ServiceNode.CBORPluginKaetzchen = append(cfg.ServiceNode.CBORPluginKaetzchen, httpProxyCfg)
-			// create empty default http_proxy_config.toml file
-			httpProxyConfigFile := filepath.Join(s.outDir, cfg.Server.Identifier, "http_proxy_config.toml")
-			saveFileContents(httpProxyConfigFile, "[Networks]\n")
+			cfg.ServiceNode.CBORPluginKaetzchen = append(cfg.ServiceNode.CBORPluginKaetzchen, rpcProxyCfg)
+			// create empty default rpc_proxy_config.toml file
+			rpcProxyConfigFile := filepath.Join(s.outDir, cfg.Server.Identifier, "rpc_proxy_config.toml")
+			saveFileContents(rpcProxyConfigFile, "[Networks]\n")
 
 			cfg.Debug.NumKaetzchenWorkers = 4
 		}

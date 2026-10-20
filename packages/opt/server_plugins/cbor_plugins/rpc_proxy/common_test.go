@@ -1,4 +1,4 @@
-package http_proxy
+package rpc_proxy
 
 import (
 	"bytes"
@@ -35,7 +35,7 @@ func TestLoadUserURLs(t *testing.T) {
 }
 
 func TestPackagedConfigEnablesProviderSelection(t *testing.T) {
-	cfg, err := LoadFile("http_proxy_config.toml")
+	cfg, err := LoadFile("rpc_proxy_config.toml")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -72,7 +72,7 @@ RUN --mount=type=cache,target="${GOCACHE}" \
   # genconfig
   && build genconfig/cmd/genconfig genconfig \
   # servicenode plugins
-  && build server_plugins/cbor_plugins/http_proxy/cmd/http_proxy http_proxy \
+  && build server_plugins/cbor_plugins/rpc_proxy/cmd/rpc_proxy rpc_proxy \
   # clients
   && build apps/walletshield walletshield
 

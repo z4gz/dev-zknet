@@ -1,6 +1,6 @@
 {
   "$schema": "../../../../../node_modules/nx/schemas/project-schema.json",
-  "name": "http-proxy",
+  "name": "rpc-proxy",
   "projectType": "library",
   "implicitDependencies": ["opt-common"],
   "targets": {
@@ -8,9 +8,9 @@
       "executor": "nx:run-commands",
       "cache": true,
       "inputs": ["{projectRoot}/**/*.go", "^default", "optModule"],
-      "outputs": ["{projectRoot}/cmd/http_proxy/http_proxy"],
+      "outputs": ["{projectRoot}/cmd/rpc_proxy/rpc_proxy"],
       "options": {
-        "command": "make http_proxy",
+        "command": "make rpc_proxy",
         "cwd": "packages/opt"
       }
     }

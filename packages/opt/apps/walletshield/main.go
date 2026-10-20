@@ -35,7 +35,7 @@ import (
 	sConstants "github.com/katzenpost/katzenpost/core/sphinx/constants"
 
 	"github.com/ZeroKnowledgeNetwork/opt/common"
-	"github.com/ZeroKnowledgeNetwork/opt/server_plugins/cbor_plugins/http_proxy"
+	"github.com/ZeroKnowledgeNetwork/opt/server_plugins/cbor_plugins/rpc_proxy"
 )
 
 var (
@@ -68,18 +68,18 @@ const healthPath = "/_/health"
 // failureStatus is the HTTP status of each reply WalletShield originates
 // instead of relaying from the upstream.
 var failureStatus = map[string]int{
-	http_proxy.ReasonMixTimeout:           http.StatusGatewayTimeout,
-	http_proxy.ReasonExitRefused:          http.StatusBadGateway,
-	http_proxy.ReasonUpstreamUnreachable:  http.StatusBadGateway,
-	http_proxy.ReasonTooLarge:             http.StatusRequestEntityTooLarge,
-	http_proxy.ReasonBadReply:             http.StatusBadGateway,
-	http_proxy.ReasonExitBusy:             http.StatusServiceUnavailable,
-	http_proxy.ReasonProviderSelectionOff: http.StatusBadGateway,
+	rpc_proxy.ReasonMixTimeout:           http.StatusGatewayTimeout,
+	rpc_proxy.ReasonExitRefused:          http.StatusBadGateway,
+	rpc_proxy.ReasonUpstreamUnreachable:  http.StatusBadGateway,
+	rpc_proxy.ReasonTooLarge:             http.StatusRequestEntityTooLarge,
+	rpc_proxy.ReasonBadReply:             http.StatusBadGateway,
+	rpc_proxy.ReasonExitBusy:             http.StatusServiceUnavailable,
+	rpc_proxy.ReasonProviderSelectionOff: http.StatusBadGateway,
 }
 
-// sendRequest carries one inner request (http_proxy.NewInnerRequest) to the
+// sendRequest carries one inner request (rpc_proxy.NewInnerRequest) to the
 // exit. userURL, when not empty, is the upstream the user chose
-// (http_proxy.Request.URL).
+// (rpc_proxy.Request.URL).
 func sendRequest(thin *thin.ThinClient, httpRequestBytes []byte, userURL string) ([]byte, error) {
 	// Compress the HTTP request
 	compressedPayload, err := common.CompressData(httpRequestBytes)
@@ -88,7 +88,7 @@ func sendRequest(thin *thin.ThinClient, httpRequestBytes []byte, userURL string)
 	}
 
 	// Create the request wrapper
-	request := &http_proxy.Request{
+	request := &rpc_proxy.Request{
 		Payload: compressedPayload,
 		URL:     userURL,
 	}
@@ -371,7 +371,7 @@ func rpcMethod(body []byte) string {
 // route classifies a request for the log; see above.
 func route(path, userURL string) (form, to string) {
 	switch {
-	case path == http_proxy.UserURLPath:
+	case path == rpc_proxy.UserURLPath:
 		to = "(none)"
 		if u, err := url.Parse(userURL); err == nil && u.Host != "" {
 			to = u.Host
@@ -436,7 +436,7 @@ func (s *Server) Handler(w http.ResponseWriter, req *http.Request) {
 
 	myurl, err := url.Parse(req.RequestURI)
 	if err != nil {
-		fail(http_proxy.ReasonExitRefused, "the request URI does not parse")
+		fail(rpc_proxy.ReasonExitRefused, "the request URI does not parse")
 		return
 	}
 
@@ -454,7 +454,7 @@ func (s *Server) Handler(w http.ResponseWriter, req *http.Request) {
 
 	// Provider selection: POST /_/url names its upstream in URLHeader. The
 	// header never crosses the mixnet; INFO logs only the URL's host.
-	userURL := req.Header.Get(http_proxy.URLHeader)
+	userURL := req.Header.Get(rpc_proxy.URLHeader)
 	form, to := route(myurl.Path, userURL)
 	l = l.With("route", form, "to", to)
 	if form == "url" {
@@ -468,7 +468,7 @@ func (s *Server) Handler(w http.ResponseWriter, req *http.Request) {
 
 	body, err := io.ReadAll(req.Body)
 	if err != nil {
-		fail(http_proxy.ReasonExitRefused, "cannot read the request body")
+		fail(rpc_proxy.ReasonExitRefused, "cannot read the request body")
 		return
 	}
 	rpc, in = rpcMethod(body), len(body)
@@ -485,42 +485,42 @@ func (s *Server) Handler(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if form == "url" && userURL == "" {
-		fail(http_proxy.ReasonExitRefused, fmt.Sprintf("POST %s needs a %s header", http_proxy.UserURLPath, http_proxy.URLHeader))
+		fail(rpc_proxy.ReasonExitRefused, fmt.Sprintf("POST %s needs a %s header", rpc_proxy.UserURLPath, rpc_proxy.URLHeader))
 		return
 	}
 
 	// The exit gets a request built afresh from the fields it uses, never
 	// the caller's: no browser header crosses the mixnet. A query is dropped.
-	inner, err := http_proxy.NewInnerRequest(req.Method, myurl.EscapedPath(), req.Header.Get("Content-Type"), body)
+	inner, err := rpc_proxy.NewInnerRequest(req.Method, myurl.EscapedPath(), req.Header.Get("Content-Type"), body)
 	if err != nil {
-		fail(http_proxy.ReasonExitRefused, err.Error())
+		fail(rpc_proxy.ReasonExitRefused, err.Error())
 		return
 	}
 
 	rawReply, err := s.send(inner, userURL)
 	if err != nil {
 		if errors.Is(err, errTooLarge) {
-			fail(http_proxy.ReasonTooLarge, err.Error())
+			fail(rpc_proxy.ReasonTooLarge, err.Error())
 		} else {
-			fail(http_proxy.ReasonMixTimeout, err.Error())
+			fail(rpc_proxy.ReasonMixTimeout, err.Error())
 		}
 		return
 	}
 
 	// use the streaming decoder and simply return the first cbor object
 	// and then discard the decoder and buffer
-	response := new(http_proxy.Response)
+	response := new(rpc_proxy.Response)
 	dec := cbor.NewDecoder(bytes.NewReader(rawReply))
 	err = dec.Decode(response)
 	if err != nil {
-		fail(http_proxy.ReasonBadReply, fmt.Sprintf("cannot decode exit reply: %s", err))
+		fail(rpc_proxy.ReasonBadReply, fmt.Sprintf("cannot decode exit reply: %s", err))
 		return
 	}
 
 	if response.Error != "" {
 		reason := exitReason(response)
 		body := failureHeaders(w, reason, response.Error)
-		reply(http.Header{http.CanonicalHeaderKey(http_proxy.ErrorHeader): {reason}}, body)
+		reply(http.Header{http.CanonicalHeaderKey(rpc_proxy.ErrorHeader): {reason}}, body)
 		warn(reason, response.Error)
 		w.WriteHeader(failureStatus[reason])
 		w.Write(body)
@@ -529,14 +529,14 @@ func (s *Server) Handler(w http.ResponseWriter, req *http.Request) {
 
 	responsePayload, err := common.DecompressData(response.Payload)
 	if err != nil {
-		fail(http_proxy.ReasonBadReply, fmt.Sprintf("cannot decompress exit reply: %s", err))
+		fail(rpc_proxy.ReasonBadReply, fmt.Sprintf("cannot decompress exit reply: %s", err))
 		return
 	}
 
 	status := response.Status
-	header := http_proxy.FilterHeaders(response.Header)
+	header := rpc_proxy.FilterHeaders(response.Header)
 	if status < 200 || status > 599 {
-		fail(http_proxy.ReasonBadReply, fmt.Sprintf("invalid upstream status %d", status))
+		fail(rpc_proxy.ReasonBadReply, fmt.Sprintf("invalid upstream status %d", status))
 		return
 	}
 
@@ -566,11 +566,11 @@ func size(n int) string {
 
 // exitReason returns the Reason of an exit error reply; a reason this
 // WalletShield does not know is ReasonExitRefused.
-func exitReason(r *http_proxy.Response) string {
+func exitReason(r *rpc_proxy.Response) string {
 	if _, ok := failureStatus[r.Reason]; ok {
 		return r.Reason
 	}
-	return http_proxy.ReasonExitRefused
+	return rpc_proxy.ReasonExitRefused
 }
 
 // writeFailure answers with a reply WalletShield originates, marked by
@@ -587,7 +587,7 @@ func failureHeaders(w http.ResponseWriter, reason, message string) []byte {
 		Reason  string `json:"reason"`
 		Message string `json:"message"`
 	}
-	w.Header().Set(http_proxy.ErrorHeader, reason)
+	w.Header().Set(rpc_proxy.ErrorHeader, reason)
 	return jsonHeaders(w, map[string]failure{"error": {reason, message}})
 }
 
@@ -638,9 +638,9 @@ func (p *probeStats) log(l *log.Logger) {
 
 func (s *Server) SendTestProbes(testProbeSendDelay int, testProbeCount int, testProbeResponseDelay int) {
 	path := fmt.Sprintf("/_/probe/%d", testProbeResponseDelay)
-	httpRequestBytes, err := http_proxy.NewInnerRequest(http.MethodGet, path, "", nil)
+	httpRequestBytes, err := rpc_proxy.NewInnerRequest(http.MethodGet, path, "", nil)
 	if err != nil {
-		s.log.Errorf("http_proxy.NewInnerRequest failed: %s", err)
+		s.log.Errorf("rpc_proxy.NewInnerRequest failed: %s", err)
 		return
 	}
 

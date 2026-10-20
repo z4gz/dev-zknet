@@ -6,12 +6,12 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/ZeroKnowledgeNetwork/opt/server_plugins/cbor_plugins/http_proxy"
+	"github.com/ZeroKnowledgeNetwork/opt/server_plugins/cbor_plugins/rpc_proxy"
 )
 
 // exposedHeaders lets a browser read the failure marker and every relayed
 // upstream header that is not CORS-safelisted.
-var exposedHeaders = strings.Join(append([]string{http_proxy.ErrorHeader}, http_proxy.RelayedHeaders...), ", ")
+var exposedHeaders = strings.Join(append([]string{rpc_proxy.ErrorHeader}, rpc_proxy.RelayedHeaders...), ", ")
 
 func isPreflight(req *http.Request) bool {
 	return req.Method == http.MethodOptions &&

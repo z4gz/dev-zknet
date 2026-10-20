@@ -25,7 +25,7 @@ mixes=3
 auths=3
 gateways=1
 storageNodes=5
-# a single service node: custom-config injects the http_proxy plugin into
+# a single service node: custom-config injects the rpc_proxy plugin into
 # servicenode1 only (upstream default is 4).
 serviceNodes=1
 # walletshield's RPC bodies need more room than upstream's 2000.
@@ -88,11 +88,11 @@ define SERVICENODE_PLUGINS
   [[ServiceNode.CBORPluginKaetzchen]]
     Capability = "http_proxy"
     Endpoint = "http_proxy"
-    Command = "/$(net_name)/http_proxy.$(distro)"
+    Command = "/$(net_name)/rpc_proxy.$(distro)"
     MaxConcurrency = 1
     Disable = false
     [ServiceNode.CBORPluginKaetzchen.Config]
-      config = "/$(net_name)/servicenode1/http_proxy_config.toml"
+      config = "/$(net_name)/servicenode1/rpc_proxy_config.toml"
       log_dir = "/$(net_name)/servicenode1"
 endef
 
@@ -107,7 +107,7 @@ help:
 	@$(MAKE) -e -C $(katzenpost_dir)/docker $@
 
 .PHONY: custom-binaries
-custom-binaries: $(net_dir)/http_proxy.$(distro)
+custom-binaries: $(net_dir)/rpc_proxy.$(distro)
 
 .PHONY: custom-config
 custom-config:
@@ -136,13 +136,13 @@ clone-katzenpost:
 
 # Sources are plain files: the empty rule keeps the pass-through `%` rule below
 # from treating them as upstream targets.
-opt_config_sources=../server_plugins/cbor_plugins/http_proxy/http_proxy_config.toml
+opt_config_sources=../server_plugins/cbor_plugins/rpc_proxy/rpc_proxy_config.toml
 unexport opt_config_sources
 $(opt_go_sources) $(opt_config_sources): ;
 
-$(net_dir)/http_proxy.$(distro): $(katzenpost_dir)/docker/$(distro)_base.stamp $(opt_go_sources) $(opt_config_sources) | $(net_name) $(cache_dir)
-	$(docker_run_sh) 'cd /go/opt/server_plugins/cbor_plugins/http_proxy/cmd/http_proxy ; go build -trimpath -ldflags ${opt_ldflags} && mv http_proxy /$(net_name)/http_proxy.$(distro)'
-	cp ../server_plugins/cbor_plugins/http_proxy/http_proxy_config.toml $(net_dir)/servicenode1/
+$(net_dir)/rpc_proxy.$(distro): $(katzenpost_dir)/docker/$(distro)_base.stamp $(opt_go_sources) $(opt_config_sources) | $(net_name) $(cache_dir)
+	$(docker_run_sh) 'cd /go/opt/server_plugins/cbor_plugins/rpc_proxy/cmd/rpc_proxy ; go build -trimpath -ldflags ${opt_ldflags} && mv rpc_proxy /$(net_name)/rpc_proxy.$(distro)'
+	cp ../server_plugins/cbor_plugins/rpc_proxy/rpc_proxy_config.toml $(net_dir)/servicenode1/
 
 # Holds the version the binaries were last built at, so a new commit rebuilds
 # walletshield (whose /_/health reports it) even when no source changed.

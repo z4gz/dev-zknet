@@ -13,7 +13,7 @@ import (
 	"github.com/fxamacker/cbor/v2"
 
 	"github.com/ZeroKnowledgeNetwork/opt/common"
-	"github.com/ZeroKnowledgeNetwork/opt/server_plugins/cbor_plugins/http_proxy"
+	"github.com/ZeroKnowledgeNetwork/opt/server_plugins/cbor_plugins/rpc_proxy"
 )
 
 const rpcReply = `{"jsonrpc":"2.0","result":"0x1","id":1}`
@@ -31,7 +31,7 @@ func testServer(t *testing.T) (http.HandlerFunc, *int) {
 			if err != nil {
 				return nil, err
 			}
-			return cbor.Marshal(&http_proxy.Response{Payload: payload, Status: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}})
+			return cbor.Marshal(&rpc_proxy.Response{Payload: payload, Status: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}})
 		},
 	}
 	return withCORS(s.Handler), &sent

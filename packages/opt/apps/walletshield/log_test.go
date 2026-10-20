@@ -15,7 +15,7 @@ import (
 
 	"github.com/charmbracelet/log"
 
-	"github.com/ZeroKnowledgeNetwork/opt/server_plugins/cbor_plugins/http_proxy"
+	"github.com/ZeroKnowledgeNetwork/opt/server_plugins/cbor_plugins/rpc_proxy"
 )
 
 // loggedServer is a handler whose (fake) mixnet answers with send, logging at
@@ -42,10 +42,10 @@ const (
 func keyedRequest() *http.Request {
 	var pretty bytes.Buffer
 	json.Indent(&pretty, []byte(secretBody), "", "  ")
-	r := httptest.NewRequest(http.MethodPost, http_proxy.UserURLPath, &pretty)
+	r := httptest.NewRequest(http.MethodPost, rpc_proxy.UserURLPath, &pretty)
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Authorization", secretAuth)
-	r.Header.Set(http_proxy.URLHeader, secretURL)
+	r.Header.Set(rpc_proxy.URLHeader, secretURL)
 	return r
 }
 
@@ -147,7 +147,7 @@ func TestDebugLogShowsEverythingRaw(t *testing.T) {
 	if err := json.Unmarshal([]byte(field(t, req[0], "headers", "body")), &inHeaders); err != nil {
 		t.Fatalf("request headers= is not raw JSON: %s\n%s", err, req[0])
 	}
-	if inHeaders.Get("Authorization") != secretAuth || inHeaders.Get(http_proxy.URLHeader) != secretURL {
+	if inHeaders.Get("Authorization") != secretAuth || inHeaders.Get(rpc_proxy.URLHeader) != secretURL {
 		t.Errorf("request headers = %v", inHeaders)
 	}
 	if got := field(t, req[0], "body", ""); got != secretBody {
@@ -186,7 +186,7 @@ func TestDebugLogNetworkURLAndNonJSONBody(t *testing.T) {
 
 // An exit refusal has a reply line: the envelope the caller receives.
 func TestDebugLogShowsTheExitRefusal(t *testing.T) {
-	h, logged := loggedServer(log.DebugLevel, exitError(http_proxy.ReasonTooLarge, "HTTP response is too big"))
+	h, logged := loggedServer(log.DebugLevel, exitError(rpc_proxy.ReasonTooLarge, "HTTP response is too big"))
 	serve(h, post(""))
 	out := logged.String()
 	rep := lines(out, "reply")

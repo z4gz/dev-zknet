@@ -21,7 +21,7 @@ import (
 	"github.com/katzenpost/katzenpost/server/cborplugin"
 
 	"github.com/ZeroKnowledgeNetwork/opt/common"
-	"github.com/ZeroKnowledgeNetwork/opt/server_plugins/cbor_plugins/http_proxy"
+	"github.com/ZeroKnowledgeNetwork/opt/server_plugins/cbor_plugins/rpc_proxy"
 )
 
 // DefaultUserForwardPayloadLength is used when the mix server does not give
@@ -49,7 +49,7 @@ func main() {
 		panic("config MUST be specified!")
 	}
 
-	cfg, err := http_proxy.LoadFile(configPath)
+	cfg, err := rpc_proxy.LoadFile(configPath)
 	if err != nil {
 		panic(err)
 	}
@@ -66,19 +66,19 @@ func main() {
 	}
 
 	// Log to a file.
-	logFile := path.Join(logDir, fmt.Sprintf("http_proxy.%d.log", os.Getpid()))
+	logFile := path.Join(logDir, fmt.Sprintf("rpc_proxy.%d.log", os.Getpid()))
 	logBackend, err := log.New(logFile, logLevel, false)
 	if err != nil {
 		panic(err)
 	}
-	serverLog := logBackend.GetLogger("http_proxy")
+	serverLog := logBackend.GetLogger("rpc_proxy")
 
 	// start service
-	tmpDir, err := os.MkdirTemp("", "http_proxy")
+	tmpDir, err := os.MkdirTemp("", "rpc_proxy")
 	if err != nil {
 		panic(err)
 	}
-	socketFile, fromHost := cborplugin.HostSocketPath(filepath.Join(tmpDir, fmt.Sprintf("%d.http_proxy.socket", os.Getpid())))
+	socketFile, fromHost := cborplugin.HostSocketPath(filepath.Join(tmpDir, fmt.Sprintf("%d.rpc_proxy.socket", os.Getpid())))
 
 	host, err := cborplugin.HostInfo()
 	if err != nil {
@@ -108,7 +108,7 @@ func main() {
 }
 
 type proxyRequestHandler struct {
-	cfg            *http_proxy.Config
+	cfg            *rpc_proxy.Config
 	log            *logging.Logger
 	maxPayloadSize int
 	networks       *http.Client
@@ -120,14 +120,14 @@ type proxyRequestHandler struct {
 	write func(cborplugin.Command)
 }
 
-func New(cfg *http_proxy.Config, log *logging.Logger, maxPayloadSize int) *proxyRequestHandler {
+func New(cfg *rpc_proxy.Config, log *logging.Logger, maxPayloadSize int) *proxyRequestHandler {
 	return &proxyRequestHandler{
 		cfg:            cfg,
 		log:            log,
 		maxPayloadSize: maxPayloadSize,
-		networks:       http_proxy.NewNetworksClient(),
-		user:           http_proxy.NewUserClient(cfg.Policy, cfg.Roots),
-		slots:          make(chan struct{}, http_proxy.ExitConcurrency),
+		networks:       rpc_proxy.NewNetworksClient(),
+		user:           rpc_proxy.NewUserClient(cfg.Policy, cfg.Roots),
+		slots:          make(chan struct{}, rpc_proxy.ExitConcurrency),
 	}
 }
 
@@ -152,14 +152,14 @@ func (s *proxyRequestHandler) OnCommand(cmd cborplugin.Command) error {
 	if r.SURB == nil {
 		errMsg := "no SURB, cannot reply"
 		s.log.Error(errMsg)
-		return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, errMsg)
+		return s.sendError(r.ID, r.SURB, rpc_proxy.ReasonExitRefused, errMsg)
 	}
 
 	select {
 	case s.slots <- struct{}{}:
 	default:
-		s.log.Warningf("busy: %d requests in flight", http_proxy.ExitConcurrency)
-		return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitBusy, "the exit is serving its maximum number of requests")
+		s.log.Warningf("busy: %d requests in flight", rpc_proxy.ExitConcurrency)
+		return s.sendError(r.ID, r.SURB, rpc_proxy.ReasonExitBusy, "the exit is serving its maximum number of requests")
 	}
 	go func() {
 		defer func() { <-s.slots }()
@@ -174,7 +174,7 @@ func (s *proxyRequestHandler) serve(r *cborplugin.Request) {
 	defer func() {
 		if p := recover(); p != nil {
 			s.log.Errorf("serve panic: %v", p)
-			s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, "internal error")
+			s.sendError(r.ID, r.SURB, rpc_proxy.ReasonExitRefused, "internal error")
 		}
 	}()
 	if err := s.handle(r); err != nil {
@@ -188,25 +188,25 @@ func (s *proxyRequestHandler) handle(r *cborplugin.Request) error {
 	// know how long it is, so we will use a streaming
 	// decoder and simply return the first cbor object
 	// and then discard the decoder and buffer
-	req := &http_proxy.Request{}
+	req := &rpc_proxy.Request{}
 	dec := cbor.NewDecoder(bytes.NewReader(r.Payload))
 	if err := dec.Decode(req); err != nil {
 		s.log.Errorf("dec.Decode(req) failed: %s", err)
-		return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, "Error decoding request")
+		return s.sendError(r.ID, r.SURB, rpc_proxy.ReasonExitRefused, "Error decoding request")
 	}
 
-	requestPayload, err := http_proxy.DecompressLimited(req.Payload, http_proxy.MaxDecompressedRequestBytes)
-	if errors.Is(err, http_proxy.ErrTooLarge) {
-		return s.sendError(r.ID, r.SURB, http_proxy.ReasonTooLarge, "request too large")
+	requestPayload, err := rpc_proxy.DecompressLimited(req.Payload, rpc_proxy.MaxDecompressedRequestBytes)
+	if errors.Is(err, rpc_proxy.ErrTooLarge) {
+		return s.sendError(r.ID, r.SURB, rpc_proxy.ReasonTooLarge, "request too large")
 	}
 	if err != nil {
 		s.log.Errorf("decompress failed: %s", err)
-		return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, "Failed to decompress request")
+		return s.sendError(r.ID, r.SURB, rpc_proxy.ReasonExitRefused, "Failed to decompress request")
 	}
-	request, err := http_proxy.ReadInnerRequest(requestPayload)
+	request, err := rpc_proxy.ReadInnerRequest(requestPayload)
 	if err != nil {
 		s.log.Errorf("request %d: refused inner request: %s", r.ID, err)
-		return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, fmt.Sprintf("inner request refused: %s", err))
+		return s.sendError(r.ID, r.SURB, rpc_proxy.ReasonExitRefused, fmt.Sprintf("inner request refused: %s", err))
 	}
 
 	s.log.Debugf("Request URL Path: %s", request.URL.Path)
@@ -220,7 +220,7 @@ func (s *proxyRequestHandler) handle(r *cborplugin.Request) error {
 		if len(segments) >= 4 {
 			responseDelay, err := strconv.Atoi(segments[3])
 			if err == nil && responseDelay > 0 {
-				delay := min(time.Duration(responseDelay)*time.Second, http_proxy.UpstreamTimeout)
+				delay := min(time.Duration(responseDelay)*time.Second, rpc_proxy.UpstreamTimeout)
 				s.log.Infof("probe: delaying response for %s", delay)
 				time.Sleep(delay)
 			}
@@ -233,7 +233,7 @@ func (s *proxyRequestHandler) handle(r *cborplugin.Request) error {
 	target, ok := s.cfg.Networks[uri]
 	if !ok {
 		s.log.Error("URI not matched with config Networks")
-		return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, "URI not configured in networks")
+		return s.sendError(r.ID, r.SURB, rpc_proxy.ReasonExitRefused, "URI not configured in networks")
 	}
 
 	return s.relay(r, s.networks, target, request)
@@ -244,11 +244,11 @@ func (s *proxyRequestHandler) handle(r *cborplugin.Request) error {
 // key.
 func (s *proxyRequestHandler) serveUserURL(r *cborplugin.Request, rawURL string, request *http.Request) error {
 	if !s.cfg.UserURLs.Enable {
-		return s.sendError(r.ID, r.SURB, http_proxy.ReasonProviderSelectionOff, "this exit does not serve user-chosen provider URLs")
+		return s.sendError(r.ID, r.SURB, rpc_proxy.ReasonProviderSelectionOff, "this exit does not serve user-chosen provider URLs")
 	}
-	target, err := http_proxy.CheckUserRequest(rawURL, request.Method, request.Header.Get("Content-Type"))
+	target, err := rpc_proxy.CheckUserRequest(rawURL, request.Method, request.Header.Get("Content-Type"))
 	if err != nil {
-		return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, err.Error())
+		return s.sendError(r.ID, r.SURB, rpc_proxy.ReasonExitRefused, err.Error())
 	}
 	s.log.Infof("request %d: provider host %s", r.ID, target.Host)
 	return s.relay(r, s.user, target.String(), request)
@@ -257,40 +257,40 @@ func (s *proxyRequestHandler) serveUserURL(r *cborplugin.Request, rawURL string,
 // relay sends the inner request's body and Content-Type to target and
 // answers with the upstream's status, relayed headers and body.
 func (s *proxyRequestHandler) relay(r *cborplugin.Request, client *http.Client, target string, request *http.Request) error {
-	body, err := http_proxy.ReadLimited(request.Body, http_proxy.MaxRequestBodyBytes)
-	if errors.Is(err, http_proxy.ErrTooLarge) {
-		return s.sendError(r.ID, r.SURB, http_proxy.ReasonTooLarge, "request body too large")
+	body, err := rpc_proxy.ReadLimited(request.Body, rpc_proxy.MaxRequestBodyBytes)
+	if errors.Is(err, rpc_proxy.ErrTooLarge) {
+		return s.sendError(r.ID, r.SURB, rpc_proxy.ReasonTooLarge, "request body too large")
 	}
 	if err != nil {
-		return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, "Failed to read request body")
+		return s.sendError(r.ID, r.SURB, rpc_proxy.ReasonExitRefused, "Failed to read request body")
 	}
 
 	newRequest, err := http.NewRequest(request.Method, target, bytes.NewReader(body))
 	if err != nil {
 		s.log.Errorf("http.NewRequest failed: %s", err)
-		return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, "Failed to create HTTP request")
+		return s.sendError(r.ID, r.SURB, rpc_proxy.ReasonExitRefused, "Failed to create HTTP request")
 	}
 	newRequest.Header.Set("Content-Type", request.Header.Get("Content-Type"))
 
 	resp, err := client.Do(newRequest)
-	if errors.Is(err, http_proxy.ErrDestinationRefused) {
+	if errors.Is(err, rpc_proxy.ErrDestinationRefused) {
 		// Refused at dial: nothing went upstream.
-		s.log.Warningf("request %d: %s", r.ID, http_proxy.LogSafe(err))
-		return s.sendError(r.ID, r.SURB, http_proxy.ReasonExitRefused, http_proxy.LogSafe(err))
+		s.log.Warningf("request %d: %s", r.ID, rpc_proxy.LogSafe(err))
+		return s.sendError(r.ID, r.SURB, rpc_proxy.ReasonExitRefused, rpc_proxy.LogSafe(err))
 	}
 	if err != nil {
-		s.log.Errorf("upstream request failed: %s", http_proxy.LogSafe(err))
-		return s.sendError(r.ID, r.SURB, http_proxy.ReasonUpstreamUnreachable, "HTTP request failed")
+		s.log.Errorf("upstream request failed: %s", rpc_proxy.LogSafe(err))
+		return s.sendError(r.ID, r.SURB, rpc_proxy.ReasonUpstreamUnreachable, "HTTP request failed")
 	}
 	defer resp.Body.Close()
 
-	respBody, err := http_proxy.ReadLimited(resp.Body, http_proxy.MaxResponseBodyBytes)
-	if errors.Is(err, http_proxy.ErrTooLarge) {
-		return s.sendError(r.ID, r.SURB, http_proxy.ReasonTooLarge, "HTTP response is too big")
+	respBody, err := rpc_proxy.ReadLimited(resp.Body, rpc_proxy.MaxResponseBodyBytes)
+	if errors.Is(err, rpc_proxy.ErrTooLarge) {
+		return s.sendError(r.ID, r.SURB, rpc_proxy.ReasonTooLarge, "HTTP response is too big")
 	}
 	if err != nil {
-		s.log.Errorf("reading upstream reply failed: %s", http_proxy.LogSafe(err))
-		return s.sendError(r.ID, r.SURB, http_proxy.ReasonUpstreamUnreachable, "reading the upstream reply failed")
+		s.log.Errorf("reading upstream reply failed: %s", rpc_proxy.LogSafe(err))
+		return s.sendError(r.ID, r.SURB, rpc_proxy.ReasonUpstreamUnreachable, "reading the upstream reply failed")
 	}
 
 	s.log.Debugf("Reply status %d, %d bytes", resp.StatusCode, len(respBody))
@@ -298,22 +298,22 @@ func (s *proxyRequestHandler) relay(r *cborplugin.Request, client *http.Client, 
 	responsePayload, err := common.CompressData(respBody)
 	if err != nil {
 		s.log.Errorf("common.CompressData failed: %s", err)
-		return s.sendError(r.ID, r.SURB, http_proxy.ReasonUpstreamUnreachable, "Failed to compress response")
+		return s.sendError(r.ID, r.SURB, rpc_proxy.ReasonUpstreamUnreachable, "Failed to compress response")
 	}
-	response := &http_proxy.Response{
+	response := &rpc_proxy.Response{
 		Payload: responsePayload,
 		Status:  resp.StatusCode,
-		Header:  http_proxy.FilterHeaders(resp.Header),
+		Header:  rpc_proxy.FilterHeaders(resp.Header),
 	}
 
 	payload, err := cbor.Marshal(response)
 	if err != nil {
 		s.log.Errorf("cbor.Marshal(response) failed: %s", err)
-		return s.sendError(r.ID, r.SURB, http_proxy.ReasonUpstreamUnreachable, "Error marshaling response")
+		return s.sendError(r.ID, r.SURB, rpc_proxy.ReasonUpstreamUnreachable, "Error marshaling response")
 	}
 	if len(payload) > s.maxPayloadSize {
 		s.log.Error("HTTP response exceeds max Sphinx payload")
-		return s.sendError(r.ID, r.SURB, http_proxy.ReasonTooLarge, "HTTP response is too big")
+		return s.sendError(r.ID, r.SURB, rpc_proxy.ReasonTooLarge, "HTTP response is too big")
 	}
 
 	go s.write(&cborplugin.Response{ID: r.ID, SURB: r.SURB, Payload: payload})
@@ -325,20 +325,20 @@ func (s *proxyRequestHandler) relay(r *cborplugin.Request, client *http.Client, 
 func (s *proxyRequestHandler) answerProbe(r *cborplugin.Request) error {
 	empty, err := common.CompressData(nil)
 	if err != nil {
-		return s.sendError(r.ID, r.SURB, http_proxy.ReasonUpstreamUnreachable, "Failed to compress response")
+		return s.sendError(r.ID, r.SURB, rpc_proxy.ReasonUpstreamUnreachable, "Failed to compress response")
 	}
-	payload, err := cbor.Marshal(&http_proxy.Response{Payload: empty, Status: http.StatusOK})
+	payload, err := cbor.Marshal(&rpc_proxy.Response{Payload: empty, Status: http.StatusOK})
 	if err != nil {
-		return s.sendError(r.ID, r.SURB, http_proxy.ReasonUpstreamUnreachable, "Error marshaling response")
+		return s.sendError(r.ID, r.SURB, rpc_proxy.ReasonUpstreamUnreachable, "Error marshaling response")
 	}
 	go s.write(&cborplugin.Response{ID: r.ID, SURB: r.SURB, Payload: payload})
 	return nil
 }
 
 // sendError replies with an exit-originated failure. reason is one of the
-// http_proxy.Reason* values.
+// rpc_proxy.Reason* values.
 func (s *proxyRequestHandler) sendError(id uint64, surb []byte, reason, msg string) error {
-	payload, _ := cbor.Marshal(&http_proxy.Response{Error: msg, Reason: reason})
+	payload, _ := cbor.Marshal(&rpc_proxy.Response{Error: msg, Reason: reason})
 	go s.write(&cborplugin.Response{ID: id, SURB: surb, Payload: payload})
 	return errors.New(msg)
 }

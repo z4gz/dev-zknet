@@ -77,7 +77,7 @@ export async function startExitTestbed(
   await new Promise<void>((resolve) => server.listen(0, gateway, resolve));
   const origin = `https://${STUB_HOST}:${(server.address() as AddressInfo).port}`;
 
-  const configFile = join(bed, 'servicenode1/http_proxy_config.toml');
+  const configFile = join(bed, 'servicenode1/rpc_proxy_config.toml');
   const packaged = readFileSync(configFile, 'utf8');
   writeFileSync(join(bed, 'servicenode1', CA_FILE), tls.cert);
   writeFileSync(

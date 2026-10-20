@@ -18,21 +18,21 @@ import (
 	"github.com/katzenpost/katzenpost/server/cborplugin"
 
 	"github.com/ZeroKnowledgeNetwork/opt/common"
-	"github.com/ZeroKnowledgeNetwork/opt/server_plugins/cbor_plugins/http_proxy"
+	"github.com/ZeroKnowledgeNetwork/opt/server_plugins/cbor_plugins/rpc_proxy"
 )
 
 // roundTrip sends one HTTP request to path through the exit handler and
 // returns the raw reply payload it writes back.
 func roundTrip(t *testing.T, networks map[string]string, path string) []byte {
 	t.Helper()
-	inner, _ := http_proxy.NewInnerRequest(http.MethodPost, path, "application/json", []byte(`{"id":1}`))
+	inner, _ := rpc_proxy.NewInnerRequest(http.MethodPost, path, "application/json", []byte(`{"id":1}`))
 	compressed, err := common.CompressData(inner)
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload, _ := cbor.Marshal(&http_proxy.Request{Payload: compressed})
+	payload, _ := cbor.Marshal(&rpc_proxy.Request{Payload: compressed})
 
-	h := New(&http_proxy.Config{Networks: networks}, logging.MustGetLogger("test"), DefaultUserForwardPayloadLength-payloadMargin)
+	h := New(&rpc_proxy.Config{Networks: networks}, logging.MustGetLogger("test"), DefaultUserForwardPayloadLength-payloadMargin)
 	replies := make(chan []byte, 1)
 	h.write = func(cmd cborplugin.Command) { replies <- cmd.(*cborplugin.Response).Payload }
 	h.OnCommand(&cborplugin.Request{ID: 1, SURB: []byte("surb"), Payload: payload})
@@ -46,9 +46,9 @@ func roundTrip(t *testing.T, networks map[string]string, path string) []byte {
 	}
 }
 
-func decode(t *testing.T, b []byte) *http_proxy.Response {
+func decode(t *testing.T, b []byte) *rpc_proxy.Response {
 	t.Helper()
-	r := new(http_proxy.Response)
+	r := new(rpc_proxy.Response)
 	if err := cbor.Unmarshal(b, r); err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestUpstreamStatusAndAllowlistedHeadersAreRelayed(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Retry-After", "7")
 		w.Header().Set("Set-Cookie", "tracker=1")
-		w.Header().Set(http_proxy.ErrorHeader, "mix-timeout")
+		w.Header().Set(rpc_proxy.ErrorHeader, "mix-timeout")
 		w.WriteHeader(http.StatusTooManyRequests)
 		w.Write([]byte(body))
 	}))
@@ -90,7 +90,7 @@ func TestExitFailuresCarryReasons(t *testing.T) {
 	huge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(big) }))
 	defer huge.Close()
 	beyondCap := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write(make([]byte, http_proxy.MaxResponseBodyBytes+1))
+		w.Write(make([]byte, rpc_proxy.MaxResponseBodyBytes+1))
 	}))
 	defer beyondCap.Close()
 
@@ -101,10 +101,10 @@ func TestExitFailuresCarryReasons(t *testing.T) {
 	cases := []struct {
 		name, path, reason string
 	}{
-		{"unconfigured network", "/missing", http_proxy.ReasonExitRefused},
-		{"unreachable upstream", "/closed", http_proxy.ReasonUpstreamUnreachable},
-		{"oversized reply", "/huge", http_proxy.ReasonTooLarge},
-		{"reply past the read cap", "/beyond", http_proxy.ReasonTooLarge},
+		{"unconfigured network", "/missing", rpc_proxy.ReasonExitRefused},
+		{"unreachable upstream", "/closed", rpc_proxy.ReasonUpstreamUnreachable},
+		{"oversized reply", "/huge", rpc_proxy.ReasonTooLarge},
+		{"reply past the read cap", "/beyond", rpc_proxy.ReasonTooLarge},
 	}
 	networks := map[string]string{"closed": closed.URL, "huge": huge.URL, "beyond": beyondCap.URL}
 	for _, c := range cases {
@@ -133,7 +133,7 @@ func TestProbeIsAnsweredWithAnEmpty200(t *testing.T) {
 // Plugin protocol 2: a parameters request gets a parameters response, not an
 // error reply for the missing SURB.
 func TestParametersRequestIsAnswered(t *testing.T) {
-	h := New(&http_proxy.Config{}, logging.MustGetLogger("test"), DefaultUserForwardPayloadLength-payloadMargin)
+	h := New(&rpc_proxy.Config{}, logging.MustGetLogger("test"), DefaultUserForwardPayloadLength-payloadMargin)
 	replies := make(chan *cborplugin.Response, 1)
 	h.write = func(cmd cborplugin.Command) { replies <- cmd.(*cborplugin.Response) }
 	if err := h.OnCommand(cborplugin.NewParametersRequest()); err != nil {
@@ -150,16 +150,16 @@ func TestParametersRequestIsAnswered(t *testing.T) {
 }
 
 // rawRoundTrip sends one serialized HTTP request through the exit handler.
-func rawRoundTrip(t *testing.T, cfg *http_proxy.Config, raw string) *http_proxy.Response {
+func rawRoundTrip(t *testing.T, cfg *rpc_proxy.Config, raw string) *rpc_proxy.Response {
 	if cfg == nil {
-		cfg = &http_proxy.Config{}
+		cfg = &rpc_proxy.Config{}
 	}
 	t.Helper()
 	compressed, err := common.CompressData([]byte(raw))
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload, _ := cbor.Marshal(&http_proxy.Request{Payload: compressed})
+	payload, _ := cbor.Marshal(&rpc_proxy.Request{Payload: compressed})
 	h := New(cfg, logging.MustGetLogger("test"), DefaultUserForwardPayloadLength-payloadMargin)
 	replies := make(chan []byte, 1)
 	h.write = func(cmd cborplugin.Command) { replies <- cmd.(*cborplugin.Response).Payload }
@@ -175,9 +175,9 @@ func rawRoundTrip(t *testing.T, cfg *http_proxy.Config, raw string) *http_proxy.
 
 // An absolute-form request line with no path once crashed the plugin.
 func TestEmptyPathIsRefusedNotAPanic(t *testing.T) {
-	r := rawRoundTrip(t, &http_proxy.Config{}, "POST https://x HTTP/1.1\r\nHost: nowhere\r\nContent-Length: 0\r\n\r\n")
-	if r.Reason != http_proxy.ReasonExitRefused {
-		t.Errorf("reply = {Reason: %q, Error: %q}, want %q", r.Reason, r.Error, http_proxy.ReasonExitRefused)
+	r := rawRoundTrip(t, &rpc_proxy.Config{}, "POST https://x HTTP/1.1\r\nHost: nowhere\r\nContent-Length: 0\r\n\r\n")
+	if r.Reason != rpc_proxy.ReasonExitRefused {
+		t.Errorf("reply = {Reason: %q, Error: %q}, want %q", r.Reason, r.Error, rpc_proxy.ReasonExitRefused)
 	}
 }
 
@@ -187,10 +187,10 @@ func TestCallerHeadersAreRefused(t *testing.T) {
 	reached := false
 	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached = true }))
 	defer upstream.Close()
-	cfg := &http_proxy.Config{Networks: map[string]string{"net": upstream.URL}}
+	cfg := &rpc_proxy.Config{Networks: map[string]string{"net": upstream.URL}}
 	r := rawRoundTrip(t, cfg, "POST /net HTTP/1.1\r\nHost: nowhere\r\nUser-Agent: Mozilla/5.0\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}")
-	if r.Reason != http_proxy.ReasonExitRefused || !strings.Contains(r.Error, "User-Agent") || strings.Contains(r.Error, "Mozilla") {
-		t.Errorf("reply = {Reason: %q, Error: %q}, want %q naming User-Agent, not its value", r.Reason, r.Error, http_proxy.ReasonExitRefused)
+	if r.Reason != rpc_proxy.ReasonExitRefused || !strings.Contains(r.Error, "User-Agent") || strings.Contains(r.Error, "Mozilla") {
+		t.Errorf("reply = {Reason: %q, Error: %q}, want %q naming User-Agent, not its value", r.Reason, r.Error, rpc_proxy.ReasonExitRefused)
 	}
 	if reached {
 		t.Error("the upstream was reached")
@@ -199,20 +199,20 @@ func TestCallerHeadersAreRefused(t *testing.T) {
 
 // Any panic while serving a request answers that request and leaves the plugin running.
 func TestPanicAnswersExitRefused(t *testing.T) {
-	h, replies := handler(&http_proxy.Config{})
+	h, replies := handler(&rpc_proxy.Config{})
 	h.cfg = nil // reading the config panics
 	send(t, h, 1, "/net", nil)
-	if r := <-replies; r.Reason != http_proxy.ReasonExitRefused || r.Error != "internal error" {
+	if r := <-replies; r.Reason != rpc_proxy.ReasonExitRefused || r.Error != "internal error" {
 		t.Errorf("reply = {Reason: %q, Error: %q}, want internal error", r.Reason, r.Error)
 	}
 }
 
 // handler returns an exit handler whose replies arrive on the returned channel.
-func handler(cfg *http_proxy.Config) (*proxyRequestHandler, chan *http_proxy.Response) {
+func handler(cfg *rpc_proxy.Config) (*proxyRequestHandler, chan *rpc_proxy.Response) {
 	h := New(cfg, logging.MustGetLogger("test"), DefaultUserForwardPayloadLength-payloadMargin)
-	replies := make(chan *http_proxy.Response, 2*http_proxy.ExitConcurrency)
+	replies := make(chan *rpc_proxy.Response, 2*rpc_proxy.ExitConcurrency)
 	h.write = func(cmd cborplugin.Command) {
-		r := new(http_proxy.Response)
+		r := new(rpc_proxy.Response)
 		cbor.Unmarshal(cmd.(*cborplugin.Response).Payload, r)
 		replies <- r
 	}
@@ -221,12 +221,12 @@ func handler(cfg *http_proxy.Config) (*proxyRequestHandler, chan *http_proxy.Res
 
 func send(t *testing.T, h *proxyRequestHandler, id uint64, path string, body []byte) {
 	t.Helper()
-	inner, err := http_proxy.NewInnerRequest(http.MethodPost, path, "application/json", body)
+	inner, err := rpc_proxy.NewInnerRequest(http.MethodPost, path, "application/json", body)
 	if err != nil {
 		t.Fatal(err)
 	}
 	compressed, _ := common.CompressData(inner)
-	payload, _ := cbor.Marshal(&http_proxy.Request{Payload: compressed})
+	payload, _ := cbor.Marshal(&rpc_proxy.Request{Payload: compressed})
 	h.OnCommand(&cborplugin.Request{ID: id, SURB: []byte("surb"), Payload: payload})
 }
 
@@ -238,15 +238,15 @@ func TestBusyExitAnswersAtOnce(t *testing.T) {
 	defer slow.Close()
 	defer close(release)
 
-	h, replies := handler(&http_proxy.Config{Networks: map[string]string{"slow": slow.URL}})
-	for i := range http_proxy.ExitConcurrency {
+	h, replies := handler(&rpc_proxy.Config{Networks: map[string]string{"slow": slow.URL}})
+	for i := range rpc_proxy.ExitConcurrency {
 		send(t, h, uint64(i), "/slow", []byte(`{}`))
 	}
 	send(t, h, 99, "/slow", []byte(`{}`))
 	select {
 	case r := <-replies:
-		if r.Reason != http_proxy.ReasonExitBusy {
-			t.Fatalf("reply = {Reason: %q, Error: %q}, want %q", r.Reason, r.Error, http_proxy.ReasonExitBusy)
+		if r.Reason != rpc_proxy.ReasonExitBusy {
+			t.Fatalf("reply = {Reason: %q, Error: %q}, want %q", r.Reason, r.Error, rpc_proxy.ReasonExitBusy)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("a request past the pool waited instead of being answered")
@@ -267,18 +267,18 @@ func TestBusyExitAnswersAtOnce(t *testing.T) {
 func TestRequestBodyCap(t *testing.T) {
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer up.Close()
-	h, replies := handler(&http_proxy.Config{Networks: map[string]string{"net": up.URL}})
-	send(t, h, 1, "/net", bytes.Repeat([]byte(" "), http_proxy.MaxRequestBodyBytes+1))
-	if r := <-replies; r.Reason != http_proxy.ReasonTooLarge {
-		t.Errorf("reply = {Reason: %q, Error: %q}, want %q", r.Reason, r.Error, http_proxy.ReasonTooLarge)
+	h, replies := handler(&rpc_proxy.Config{Networks: map[string]string{"net": up.URL}})
+	send(t, h, 1, "/net", bytes.Repeat([]byte(" "), rpc_proxy.MaxRequestBodyBytes+1))
+	if r := <-replies; r.Reason != rpc_proxy.ReasonTooLarge {
+		t.Errorf("reply = {Reason: %q, Error: %q}, want %q", r.Reason, r.Error, rpc_proxy.ReasonTooLarge)
 	}
 }
 
 func TestInflatedRequestCap(t *testing.T) {
-	h, replies := handler(&http_proxy.Config{})
-	send(t, h, 1, "/net", bytes.Repeat([]byte(" "), http_proxy.MaxDecompressedRequestBytes))
-	if r := <-replies; r.Reason != http_proxy.ReasonTooLarge {
-		t.Errorf("reply = {Reason: %q, Error: %q}, want %q", r.Reason, r.Error, http_proxy.ReasonTooLarge)
+	h, replies := handler(&rpc_proxy.Config{})
+	send(t, h, 1, "/net", bytes.Repeat([]byte(" "), rpc_proxy.MaxDecompressedRequestBytes))
+	if r := <-replies; r.Reason != rpc_proxy.ReasonTooLarge {
+		t.Errorf("reply = {Reason: %q, Error: %q}, want %q", r.Reason, r.Error, rpc_proxy.ReasonTooLarge)
 	}
 }
 
@@ -289,29 +289,29 @@ func TestHungUpstreamIsUpstreamUnreachable(t *testing.T) {
 	hung := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-release }))
 	defer hung.Close()
 	defer close(release)
-	h, replies := handler(&http_proxy.Config{Networks: map[string]string{"hung": hung.URL}})
+	h, replies := handler(&rpc_proxy.Config{Networks: map[string]string{"hung": hung.URL}})
 	h.networks.Timeout = 200 * time.Millisecond
 	send(t, h, 1, "/hung", []byte(`{}`))
-	if r := <-replies; r.Reason != http_proxy.ReasonUpstreamUnreachable {
-		t.Errorf("reply = {Reason: %q, Error: %q}, want %q", r.Reason, r.Error, http_proxy.ReasonUpstreamUnreachable)
+	if r := <-replies; r.Reason != rpc_proxy.ReasonUpstreamUnreachable {
+		t.Errorf("reply = {Reason: %q, Error: %q}, want %q", r.Reason, r.Error, rpc_proxy.ReasonUpstreamUnreachable)
 	}
 }
 
 // sendURL sends a request that names its own upstream.
 func sendURL(t *testing.T, h *proxyRequestHandler, rawURL, method, contentType string) {
 	t.Helper()
-	inner, err := http_proxy.NewInnerRequest(method, http_proxy.UserURLPath, contentType, []byte(`{"id":1}`))
+	inner, err := rpc_proxy.NewInnerRequest(method, rpc_proxy.UserURLPath, contentType, []byte(`{"id":1}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	compressed, _ := common.CompressData(inner)
-	payload, _ := cbor.Marshal(&http_proxy.Request{Payload: compressed, URL: rawURL})
+	payload, _ := cbor.Marshal(&rpc_proxy.Request{Payload: compressed, URL: rawURL})
 	h.OnCommand(&cborplugin.Request{ID: 1, SURB: []byte("surb"), Payload: payload})
 }
 
 // tlsUpstream is an https stub, and the exit config that lets the policy
 // reach it: loopback allowed, its CA trusted.
-func tlsUpstream(t *testing.T, h http.HandlerFunc) (*httptest.Server, *http_proxy.Config, *bool) {
+func tlsUpstream(t *testing.T, h http.HandlerFunc) (*httptest.Server, *rpc_proxy.Config, *bool) {
 	t.Helper()
 	dialed := new(bool)
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -319,9 +319,9 @@ func tlsUpstream(t *testing.T, h http.HandlerFunc) (*httptest.Server, *http_prox
 		h(w, r)
 	}))
 	t.Cleanup(srv.Close)
-	cfg := &http_proxy.Config{
-		UserURLs: http_proxy.UserURLs{Enable: true},
-		Policy:   http_proxy.Policy{Allow: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}},
+	cfg := &rpc_proxy.Config{
+		UserURLs: rpc_proxy.UserURLs{Enable: true},
+		Policy:   rpc_proxy.Policy{Allow: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}},
 		Roots:    srv.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs,
 	}
 	return srv, cfg, dialed
@@ -351,15 +351,15 @@ func TestUserURLRefusals(t *testing.T) {
 	srv, cfg, dialed := tlsUpstream(t, func(w http.ResponseWriter, r *http.Request) {})
 	cases := []struct {
 		name, url, method, ctype, reason string
-		cfg                              *http_proxy.Config
+		cfg                              *rpc_proxy.Config
 	}{
-		{"private address", srv.URL, http.MethodPost, "application/json", http_proxy.ReasonExitRefused, &http_proxy.Config{UserURLs: http_proxy.UserURLs{Enable: true}}},
-		{"plain http", "http://" + srv.Listener.Addr().String(), http.MethodPost, "application/json", http_proxy.ReasonExitRefused, cfg},
-		{"credentials", strings.Replace(srv.URL, "https://", "https://u:p@", 1), http.MethodPost, "application/json", http_proxy.ReasonExitRefused, cfg},
-		{"GET", srv.URL, http.MethodGet, "application/json", http_proxy.ReasonExitRefused, cfg},
-		{"not JSON", srv.URL, http.MethodPost, "text/plain", http_proxy.ReasonExitRefused, cfg},
-		{"too long", srv.URL + "/" + strings.Repeat("a", http_proxy.MaxURLLength), http.MethodPost, "application/json", http_proxy.ReasonExitRefused, cfg},
-		{"provider selection off", srv.URL, http.MethodPost, "application/json", http_proxy.ReasonProviderSelectionOff, &http_proxy.Config{Policy: cfg.Policy, Roots: cfg.Roots}},
+		{"private address", srv.URL, http.MethodPost, "application/json", rpc_proxy.ReasonExitRefused, &rpc_proxy.Config{UserURLs: rpc_proxy.UserURLs{Enable: true}}},
+		{"plain http", "http://" + srv.Listener.Addr().String(), http.MethodPost, "application/json", rpc_proxy.ReasonExitRefused, cfg},
+		{"credentials", strings.Replace(srv.URL, "https://", "https://u:p@", 1), http.MethodPost, "application/json", rpc_proxy.ReasonExitRefused, cfg},
+		{"GET", srv.URL, http.MethodGet, "application/json", rpc_proxy.ReasonExitRefused, cfg},
+		{"not JSON", srv.URL, http.MethodPost, "text/plain", rpc_proxy.ReasonExitRefused, cfg},
+		{"too long", srv.URL + "/" + strings.Repeat("a", rpc_proxy.MaxURLLength), http.MethodPost, "application/json", rpc_proxy.ReasonExitRefused, cfg},
+		{"provider selection off", srv.URL, http.MethodPost, "application/json", rpc_proxy.ReasonProviderSelectionOff, &rpc_proxy.Config{Policy: cfg.Policy, Roots: cfg.Roots}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -380,9 +380,9 @@ func TestProviderSelectionOffDoesNotFallBack(t *testing.T) {
 	hit := false
 	net := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hit = true }))
 	defer net.Close()
-	h, replies := handler(&http_proxy.Config{Networks: map[string]string{"_/url": net.URL}})
+	h, replies := handler(&rpc_proxy.Config{Networks: map[string]string{"_/url": net.URL}})
 	sendURL(t, h, "https://rpc.example", http.MethodPost, "application/json")
-	if r := <-replies; r.Reason != http_proxy.ReasonProviderSelectionOff || hit {
+	if r := <-replies; r.Reason != rpc_proxy.ReasonProviderSelectionOff || hit {
 		t.Errorf("reply %q, [Networks] hit: %v", r.Reason, hit)
 	}
 }

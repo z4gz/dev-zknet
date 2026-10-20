@@ -1,4 +1,4 @@
-package http_proxy
+package rpc_proxy
 
 import "time"
 
