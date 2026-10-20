@@ -34,9 +34,9 @@ dist/woodpecker/
 └── zkn-client/             *.deb, *.rpm, *.AppImage
 ```
 
-A cold run (empty cache) takes about 7 minutes and a warm one about 2; the
-cache volume holds about 12 GB after `dist.yaml` and grows when `ci.yaml` adds
-its own Cargo build.
+A cold run (empty cache) takes about 7 minutes and a warm one about 2. The
+cache volume holds about 12 GB after `dist.yaml` and 19 GB once `ci.yaml` has
+added its own Cargo build.
 
 `--repo-trusted-volumes` is required because the steps mount the host cache
 directory `/var/tmp/zknet-woodpecker` (as `/cache`). It holds the toolchains,
