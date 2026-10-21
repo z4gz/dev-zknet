@@ -113,7 +113,8 @@ pnpm nx run @zknet/client:desktop-build:release     # macOS/Windows native runne
 The `dev` desktop bundle is a debug build (devtools, debug assertions) that
 targets the local network: it merges `tauri.dev-local.conf.json` (network URL
 `http://127.0.0.1:8765`, thin-mode WalletShield, the `dev-local` capability)
-and `tauri.dist-dev.conf.json` (no updater artifacts, so no signing key). Its
+and `tauri.dev.conf.json` (no updater artifacts, so no signing key, and no in-app
+update check: `plugins.zknet.updater` is `false`). Its
 DWARF debug info is stripped (`CARGO_PROFILE_DEV_STRIP=debuginfo`): with it,
 the binary is 411 MB and the rpm bundler takes over 20 minutes.
 

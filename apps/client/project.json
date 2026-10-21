@@ -11,7 +11,7 @@
       "executor": "nx:run-commands",
       "cache": false,
       "options": {
-        "command": "pnpm tauri dev",
+        "command": "pnpm tauri dev --config src-tauri/tauri.dev.conf.json",
         "cwd": "{projectRoot}"
       }
     },
@@ -20,7 +20,7 @@
       "cache": false,
       "dependsOn": ["network-assets:serve"],
       "options": {
-        "command": "python3 ../network-assets/server.py ready && pnpm tauri dev --config src-tauri/tauri.dev-local.conf.json",
+        "command": "python3 ../network-assets/server.py ready && pnpm tauri dev --config src-tauri/tauri.dev-local.conf.json --config src-tauri/tauri.dev.conf.json",
         "cwd": "{projectRoot}"
       }
     },
@@ -33,7 +33,7 @@
       "defaultConfiguration": "dev",
       "configurations": {
         "dev": {
-          "command": "pnpm tauri build --debug --config src-tauri/tauri.dev-local.conf.json --config src-tauri/tauri.dist-dev.conf.json",
+          "command": "pnpm tauri build --debug --config src-tauri/tauri.dev-local.conf.json --config src-tauri/tauri.dev.conf.json",
           "env": {
             "CARGO_PROFILE_DEV_STRIP": "debuginfo"
           }

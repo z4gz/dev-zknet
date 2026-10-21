@@ -11,6 +11,7 @@ export interface ZKNetClientCfg {
   urlNetwork: string;
   walletshieldLogLevel: string;
   walletshieldThin: boolean;
+  updater: boolean;
 }
 
 export const getZKNetClientCfg = async (): Promise<ZKNetClientCfg> => {
