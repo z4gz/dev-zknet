@@ -119,8 +119,11 @@ apt_install() {
 # --- source -----------------------------------------------------------------
 
 # checkout: make $SRC the committed HEAD of the mounted workspace, as a fresh
-# clone would be, but keep node_modules and the cargo target directories so
-# that warm runs are incremental. Uncommitted changes are not built.
+# clone would be, but keep the cargo target directories so that warm runs are
+# incremental. Uncommitted changes are not built. node_modules goes with the
+# other ignored files: install-time scripts generate state outside it (e.g.
+# apps/ext's `wxt prepare` writes apps/ext/.wxt), and pnpm only reruns them on
+# a real install, which the store on the cache volume keeps fast.
 checkout() {
   git config --global --add safe.directory '*'
   [ -d "$SRC/.git" ] || git init -q "$SRC"
@@ -128,7 +131,7 @@ checkout() {
   git -C "$SRC" tag -l | xargs -r git -C "$SRC" tag -d >/dev/null
   git -C "$SRC" fetch -q --force --tags "$CI_WORKSPACE" HEAD
   git -C "$SRC" checkout -q --force --detach FETCH_HEAD
-  git -C "$SRC" clean -q -ffdx -e node_modules -e '/dist/target*'
+  git -C "$SRC" clean -q -ffdx -e '/dist/target*'
   # bundles are outputs of this run only, not build state
   rm -rf "$SRC"/dist/target/*/bundle
   # a server's clone has an origin, and goreleaser's release (not snapshot) needs one
