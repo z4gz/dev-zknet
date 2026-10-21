@@ -47,3 +47,5 @@ Thumbs.db
 .nx/polygraph
 vite.config.*.timestamp*
 vitest.config.*.timestamp*
+# local Woodpecker settings (.woodpecker/local.env.example)
+/.woodpecker/local.env

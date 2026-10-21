@@ -4,14 +4,10 @@
 when:
   - event: [push, pull_request, manual]
 
-variables:
-  - &cache /var/tmp/zknet-woodpecker:/cache
-
 steps:
   ci:
     # ci.yml runs on ubuntu-latest, which is Ubuntu 24.04
     image: ubuntu:24.04
-    volumes: [*cache]
     commands:
       - . "$CI_WORKSPACE/.woodpecker/lib.sh"
       # ci.yml's runner has these preinstalled, except the Tauri prerequisites

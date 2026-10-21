@@ -7,13 +7,9 @@
 when:
   - event: [push, manual, tag]
 
-variables:
-  - &cache /var/tmp/zknet-woodpecker:/cache
-
 steps:
   prepare:
     image: ghcr.io/rust-cross/cargo-zigbuild:0.23.4
-    volumes: [*cache]
     commands:
       - . "$CI_WORKSPACE/.woodpecker/lib.sh"
       - tools node
@@ -23,7 +19,6 @@ steps:
   walletshield:
     image: ghcr.io/goreleaser/goreleaser-cross:v1.27.3
     depends_on: [prepare]
-    volumes: [*cache]
     commands:
       - . "$CI_WORKSPACE/.woodpecker/lib.sh"
       - tools node zig upx
@@ -33,10 +28,9 @@ steps:
   cli:
     image: ghcr.io/rust-cross/cargo-zigbuild:0.23.4
     depends_on: [prepare]
-    volumes: [*cache]
     commands:
       - . "$CI_WORKSPACE/.woodpecker/lib.sh"
-      # the image's rustup proxies, with RUSTUP_HOME on the cache volume
+      # the image's rustup proxies, with RUSTUP_HOME in the cache directory
       - export PATH=/usr/local/cargo/bin:$PATH
       - tools node upx
       - cd "$SRC"
@@ -47,7 +41,6 @@ steps:
     # were built against, so build on old systems to run on newer ones.
     image: ubuntu:22.04
     depends_on: [prepare]
-    volumes: [*cache]
     commands:
       - . "$CI_WORKSPACE/.woodpecker/lib.sh"
       - apt_install ca-certificates curl git xz-utils build-essential pkg-config file libwebkit2gtk-4.1-dev
@@ -81,7 +74,6 @@ steps:
   collect:
     image: alpine:latest
     depends_on: [walletshield, cli, desktop]
-    volumes: [*cache]
     when:
       - status: [success, failure]
     commands:

@@ -1,10 +1,17 @@
 # Step setup shared by the .woodpecker pipelines. Source it from a step's
 # commands (POSIX sh: Woodpecker runs each step with `/bin/sh -e`).
 #
-# Every step mounts the host cache volume at /cache. It holds the toolchains
-# (pinned, sha256-verified, installed once), the language caches and one
-# persistent clone of the repository at a fixed path, so that warm runs reuse
-# build state and outputs do not depend on where the host checkout lives.
+# Every step has the host cache directory mounted at /cache. It holds the
+# toolchains (pinned, sha256-verified, installed once), the language caches and
+# one persistent clone of the repository at a fixed path, so that warm runs
+# reuse build state and outputs do not depend on where the host checkout lives.
+
+# .woodpecker/run mounts the host cache directory at /cache (woodpecker-cli
+# exec --volumes); without it every run would start cold and lose its outputs.
+grep -q ' /cache ' /proc/self/mountinfo || {
+  echo "lib.sh: /cache is not mounted; start pipelines with .woodpecker/run" >&2
+  return 1
+}
 
 export CACHE=/cache
 export SRC=$CACHE/src
