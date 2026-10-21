@@ -43,13 +43,16 @@ steps:
       - pnpm exec nx run zknet_client_cli:dist:$(rung)
 
   desktop:
-    image: ubuntu:24.04
+    # The oldest supported LTS: the bundles need the glibc and WebKitGTK they
+    # were built against, so build on old systems to run on newer ones.
+    image: ubuntu:22.04
     depends_on: [prepare]
     volumes: [*cache]
     commands:
       - . "$CI_WORKSPACE/.woodpecker/lib.sh"
       - apt_install ca-certificates curl git xz-utils build-essential pkg-config file libwebkit2gtk-4.1-dev
       - tools node rust
+      - own_target_dir
       - cd "$SRC"
       # the release rung signs the updater artifacts; fail before building
       - '[ "$(rung)" = dev ] || [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] || { echo "desktop: the release rung needs TAURI_SIGNING_PRIVATE_KEY"; exit 1; }'
@@ -86,7 +89,7 @@ steps:
       - rm -rf "$out" && mkdir -p "$out"
       - cd /cache/src/dist
       - for d in walletshield zknet_client_cli; do [ ! -d $d ] || cp -a $d "$out/"; done
-      - for p in target/*/bundle/*/*.deb target/*/bundle/*/*.rpm target/*/bundle/*/*.AppImage; do [ ! -f $p ] || { mkdir -p "$out/zkn-client" && cp -a $p "$out/zkn-client/"; }; done
+      - for p in target*/*/bundle/*/*.deb target*/*/bundle/*/*.rpm target*/*/bundle/*/*.AppImage; do [ ! -f $p ] || { mkdir -p "$out/zkn-client" && cp -a $p "$out/zkn-client/"; }; done
       - owner=$(stat -c %u:%g "$CI_WORKSPACE")
       - chown "$owner" "$CI_WORKSPACE/dist" && chown -R "$owner" "$out"
       - ls -R "$out" | head -60

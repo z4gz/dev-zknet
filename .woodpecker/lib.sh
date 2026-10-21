@@ -107,13 +107,29 @@ tools() {
   export PATH
 }
 
+# codename: the step image's OS release (noble, jammy, ...). Build state that
+# depends on the image's system libraries is kept apart per release.
+codename() {
+  (. /etc/os-release && echo "$VERSION_CODENAME")
+}
+
 # apt_install PACKAGE...: Debian/Ubuntu step images, with the package archive
 # on the cache volume so a warm run only unpacks.
 apt_install() {
-  mkdir -p "$CACHE/apt/archives/partial"
-  apt-get -qq -o Dir::Cache::archives="$CACHE/apt/archives" update
-  DEBIAN_FRONTEND=noninteractive apt-get -qq -o Dir::Cache::archives="$CACHE/apt/archives" \
+  _a=$CACHE/apt/$(codename)
+  mkdir -p "$_a/partial"
+  apt-get -qq -o Dir::Cache::archives="$_a" update
+  DEBIAN_FRONTEND=noninteractive apt-get -qq -o Dir::Cache::archives="$_a" \
     install -y --no-install-recommends "$@" >/dev/null
+}
+
+# own_target_dir: give this step's Cargo builds a target directory of its
+# image's release. Cargo's fingerprints do not cover the system glibc, so a
+# target directory shared across images reuses build scripts and proc macros
+# linked against another glibc (seen: GLIBC_2.39 not found, E0463 for tauri).
+# An explicit --target-dir on the command line still wins.
+own_target_dir() {
+  export CARGO_TARGET_DIR="$SRC/dist/target-$(codename)"
 }
 
 # --- source -----------------------------------------------------------------
@@ -133,7 +149,7 @@ checkout() {
   git -C "$SRC" checkout -q --force --detach FETCH_HEAD
   git -C "$SRC" clean -q -ffdx -e '/dist/target*'
   # bundles are outputs of this run only, not build state
-  rm -rf "$SRC"/dist/target/*/bundle
+  rm -rf "$SRC"/dist/target*/*/bundle
   # a server's clone has an origin, and goreleaser's release (not snapshot) needs one
   git -C "$SRC" remote add origin "$CI_WORKSPACE" 2>/dev/null || git -C "$SRC" remote set-url origin "$CI_WORKSPACE"
   echo "checkout: $(git -C "$SRC" describe --tags --always --long) at $SRC"
