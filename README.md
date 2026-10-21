@@ -148,9 +148,10 @@ avoids retagging an image someone else built. The default is `alpine`.
 
 ## Run the clients locally
 
-With the local mixnet running (`mixnet:start`, `mixnet:ready`), each client target stages
-and serves that network's assets on `127.0.0.1:8765`, then connects in WalletShield thin
-mode through the host-exposed client daemon:
+With the local mixnet running (`mixnet:start`, `mixnet:ready`) and a current WalletShield
+dist (`.woodpecker/run dist`), each client target stages and serves that network's assets
+on `127.0.0.1:8765`, then connects in WalletShield thin mode through the host-exposed
+client daemon:
 
 ```sh
 pnpm nx run zknet_client_cli:dev-local         # headless; WalletShield on :7070
