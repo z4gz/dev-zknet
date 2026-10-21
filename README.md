@@ -83,8 +83,8 @@ the Linux desktop bundles) run locally on Woodpecker; see
 [`.woodpecker/README.md`](.woodpecker/README.md):
 
 ```sh
-woodpecker-cli exec --local --backend-engine docker --repo-trusted-volumes .woodpecker/ci.yaml
-woodpecker-cli exec --local --backend-engine docker --repo-trusted-volumes .woodpecker/dist.yaml
+.woodpecker/run ci
+.woodpecker/run dist
 ```
 
 ## Run the local mixnet

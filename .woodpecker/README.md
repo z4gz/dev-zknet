@@ -9,16 +9,20 @@ docker-in-docker: each step's image is the toolchain.
 | `ci.yaml`   | The checks of `.github/workflows/ci.yml`: `nx format:check` and `nx run-many -t lint test build typecheck`                |
 | `dist.yaml` | WalletShield and the CLI for linux-amd64, linux-arm64, darwin-universal and windows-amd64, plus the Linux desktop bundles |
 | `lib.sh`    | Step setup both pipelines source: pinned toolchains, caches, the checkout                                                 |
+| `run`       | The entry point: `woodpecker-cli exec` with the host cache directory mounted                                              |
 
 ## Run
 
-From the repository root, one pipeline at a time (they share the checkout on
-the cache volume):
+One pipeline at a time (they share the checkout in the cache directory):
 
 ```sh
-woodpecker-cli exec --local --backend-engine docker --repo-trusted-volumes .woodpecker/ci.yaml
-woodpecker-cli exec --local --backend-engine docker --repo-trusted-volumes .woodpecker/dist.yaml
+.woodpecker/run ci
+.woodpecker/run dist
 ```
+
+`run` is `woodpecker-cli exec --local --backend-engine docker --volumes
+<cache>:/cache` plus any further `exec` flags you pass before or after the
+pipeline name.
 
 The pipelines build the **committed `HEAD`**, the way a Woodpecker server builds
 a pushed commit: commit first, or use the Nx targets below to build the working
@@ -38,10 +42,49 @@ A cold run (empty cache) takes about 7 minutes and a warm one about 2. The
 cache volume holds about 12 GB after `dist.yaml` and 19 GB once `ci.yaml` has
 added its own Cargo build.
 
-`--repo-trusted-volumes` is required because the steps mount the host cache
-directory `/var/tmp/zknet-woodpecker` (as `/cache`). It holds the toolchains,
-the Go, Cargo, pnpm, zig and apt caches, and the checkout (`/cache/src`). Its
-contents are root-owned; to reclaim the space:
+## The cache directory
+
+Every step gets one host directory at `/cache`: the toolchains, the Go, Cargo,
+pnpm, zig and apt caches, and the checkout (`/cache/src`). The pipelines
+declare no volume; `run` mounts it with `exec --volumes`, so no
+`--repo-trusted-volumes` is needed, and `lib.sh` stops a step whose `/cache`
+is not mounted.
+
+```sh
+# The host cache directory, first match wins:
+#   1. ZKNET_WOODPECKER_CACHE in the environment
+#   2. ZKNET_WOODPECKER_CACHE in .woodpecker/local.env  (git-ignored)
+#   3. /var/tmp/zknet-woodpecker                         (the default, in run)
+
+.woodpecker/run dist                                          # default, or local.env
+ZKNET_WOODPECKER_CACHE=/data/zknet-woodpecker .woodpecker/run dist   # this run only
+
+# this machine, from now on:
+cp .woodpecker/local.env.example .woodpecker/local.env
+$EDITOR .woodpecker/local.env      # ZKNET_WOODPECKER_CACHE=/data/zknet-woodpecker
+```
+
+The path must be absolute and must outlive the environment the pipelines are
+started from (in a container, a bind-mounted host path). Elsewhere, set the
+same mount without `run`:
+
+| Where                 | How                                                                                      |
+| --------------------- | ---------------------------------------------------------------------------------------- |
+| `woodpecker-cli exec` | `--volumes <dir>:/cache`, or `WOODPECKER_VOLUMES=<dir>:/cache` in its environment        |
+| a Woodpecker agent    | `WOODPECKER_BACKEND_DOCKER_VOLUMES=<dir>:/cache` (docker backend: mounted in every step) |
+| a GitHub Actions job  | `run: .woodpecker/run dist` with `env: ZKNET_WOODPECKER_CACHE: …`                        |
+
+Moving an existing cache keeps it warm (build state refers only to `/cache/...`
+paths inside the steps). Its contents are root-owned:
+
+```sh
+sudo mv /var/tmp/zknet-woodpecker /data/zknet-woodpecker    # same filesystem
+sudo rsync -a /var/tmp/zknet-woodpecker/ /data/zknet-woodpecker/ \
+  && sudo rm -rf /var/tmp/zknet-woodpecker                  # across filesystems
+echo ZKNET_WOODPECKER_CACHE=/data/zknet-woodpecker > .woodpecker/local.env
+```
+
+To reclaim the space instead:
 
 ```sh
 docker run --rm -v /var/tmp:/v alpine rm -rf /v/zknet-woodpecker
@@ -84,8 +127,7 @@ a tag run before building. Try the release rung on a throwaway clone with a
 test tag:
 
 ```sh
-woodpecker-cli exec --local --backend-engine docker --repo-trusted-volumes \
-  --pipeline-event tag --commit-ref refs/tags/v0.0.0-test .woodpecker/dist.yaml
+.woodpecker/run dist --pipeline-event tag --commit-ref refs/tags/v0.0.0-test
 ```
 
 ## Platform notes
@@ -97,8 +139,14 @@ woodpecker-cli exec --local --backend-engine docker --repo-trusted-volumes \
 - **UPX** packs the Linux and Windows binaries. UPX 5.2.1 refuses macOS.
 - **SQIsign** is linked only into linux-amd64 WalletShield; the hpqc build
   for other platforms returns `ErrUnsupported`.
-- The **desktop** bundles for macOS and Windows need native hosts; they are
-  not built here. The Linux bundles inherit Ubuntu 24.04's glibc and WebKitGTK.
+- The **desktop** Linux bundles build on **Ubuntu 22.04**, the oldest
+  supported LTS, because they need the glibc and WebKitGTK they were built
+  against: build on old systems to run on newer ones. The binary needs at most
+  GLIBC_2.34 and the AppImage payload GLIBC_2.35. macOS and Windows bundles
+  need native hosts and are not built here.
+- **Cargo target directories never cross step images**: `own_target_dir` in
+  `lib.sh` gives a step `dist/target-<release>` (e.g. `target-jammy`), because
+  Cargo's fingerprints do not cover the system glibc.
 
 ## Differences from `ci.yml`
 
@@ -108,7 +156,8 @@ woodpecker-cli exec --local --backend-engine docker --repo-trusted-volumes \
   (`CI_PREV_COMMIT_SHA`), else `HEAD~1`; `ci.yml` asks `nrwl/nx-set-shas` for
   the last green commit on `main`.
 - No `nx fix-ci` (Nx Cloud self-healing); the workspace has no Nx Cloud.
-- `node_modules` and the Cargo target directory persist between runs on the
-  cache volume; `pnpm install --frozen-lockfile` still verifies the lockfile.
-  Cargo runs with `CARGO_INCREMENTAL=0`.
+- The Cargo target directory persists between runs in the cache directory;
+  Cargo runs with `CARGO_INCREMENTAL=0`. `node_modules` is reinstalled every
+  run, hard-linked from the pnpm store in the cache directory, so install-time
+  scripts such as `apps/ext`'s `wxt prepare` always run.
 - Go is 1.27.3 from `go.dev`; `ci.yml` uses whatever Go the runner image has.
