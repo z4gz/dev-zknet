@@ -47,6 +47,22 @@ jobs:
       # Rust toolchain pinned by rust-toolchain.toml (channel and components)
       - run: rustup toolchain install && cargo --version
 
+      # Foundry (forge, anvil) for @zknet/anon-rpc-specifier's tests. Same pin
+      # and checksum as .woodpecker/lib.sh; keep the two in step.
+      - name: Install Foundry
+        env:
+          FOUNDRY_VERSION: 1.8.5
+          FOUNDRY_SHA256: 6c66ffcc55fa4249197721baa3098bc208014ea1d8aa04b2ed50ac6bccffb226
+        run: |
+          f="foundry_v${FOUNDRY_VERSION}_linux_amd64.tar.gz"
+          curl -fsSLO "https://github.com/foundry-rs/foundry/releases/download/v${FOUNDRY_VERSION}/$f"
+          echo "${FOUNDRY_SHA256}  $f" | sha256sum -c -
+          mkdir -p "$HOME/.foundry/bin"
+          tar -xzf "$f" -C "$HOME/.foundry/bin"
+          rm "$f"
+          echo "$HOME/.foundry/bin" >> "$GITHUB_PATH"
+          "$HOME/.foundry/bin/forge" --version
+
       - run: pnpm install --frozen-lockfile
 
       # Derive affected base/head SHAs so format:check compares against the last green main
