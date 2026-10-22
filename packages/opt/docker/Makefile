@@ -86,6 +86,17 @@ docker_run_sh=$(docker) run ${docker_args} $(mount_net_name) $(mount_opt) --rm k
 compose_network_sh=printf '%s_%s_katzenpost-net' '$(net_name)' "$$(cat $(kp_docker_dir)/.base_port_seed | sha1sum | head -c 5)" | tr -d .
 unexport compose_network_sh
 
+# public_ip set (by a network file): its gateways are published on it; see
+# publish-gateways.sh. Compose reads the extra file through COMPOSE_FILE rather
+# than docker-compose.override.yml, which upstream owns: its stop deletes that
+# file and its interop-gate writes it.
+ifneq ($(public_ip),)
+public_first_port?=30001
+publish_addr?=0.0.0.0
+public_client_listen?=127.0.0.1:64331
+COMPOSE_FILE=docker-compose.yml:docker-compose.public.yml
+endif
+
 # rpc_proxy's log level, passed as its -log_level flag; empty keeps the
 # plugin's default (DEBUG).
 rpc_proxy_log_level?=
@@ -145,6 +156,15 @@ custom-config:
 			sed -i '/^\[Logging\]$$/,/^\[/s/^\( *Disable = \).*/\1$(log_disable)/' "$$file" || exit 1; \
 		fi; \
 	done
+
+# Publishes the gateways of a network that sets public_ip (publish-gateways.sh).
+# Runs on every start, after the config is generated: it rewrites its outputs
+# from the generated config, so a changed address or port takes effect.
+.PHONY: public-gateways
+public-gateways:
+ifneq ($(public_ip),)
+	./publish-gateways.sh $(net_dir) $(public_ip) $(public_first_port) $(publish_addr) $(public_client_listen)
+endif
 
 .PHONY: clone-katzenpost
 clone-katzenpost:
@@ -212,7 +232,7 @@ clean: walletshield-stop
 	rm -rf $(katzenpost_dir)
 
 # start the testnet in the background with the local customizations
-start: clone-katzenpost $(docker_compose_yml) custom-config custom-binaries
+start: clone-katzenpost $(docker_compose_yml) custom-config custom-binaries public-gateways
 	$(MAKE) -e -C $(katzenpost_dir)/docker $@
 
 # A network without storage replicas: upstream's wait requires two (fetch -r 2),
