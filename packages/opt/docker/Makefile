@@ -80,6 +80,11 @@ unexport opt_go_sources
 net_dir=$(kp_docker_dir)/$(net_name)
 mount_opt=-v $(shell readlink -f ..):/go/opt
 docker_run_sh=$(docker) run ${docker_args} $(mount_net_name) $(mount_opt) --rm katzenpost-$(distro)_base $(sh) -c
+# The compose network of the current net_name, derived in the shell like
+# upstream's compose_network_name (which must not be defined here: it would be
+# exported and override upstream's own).
+compose_network_sh=printf '%s_%s_katzenpost-net' '$(net_name)' "$$(cat $(kp_docker_dir)/.base_port_seed | sha1sum | head -c 5)" | tr -d .
+unexport compose_network_sh
 
 # rpc_proxy's log level, passed as its -log_level flag; empty keeps the
 # plugin's default (DEBUG).
@@ -178,12 +183,10 @@ walletshield-probe: $(net_dir)/walletshield.$(distro) $(net_dir)/running.stamp |
 		/$(net_name)/walletshield.$(distro) -config /$(net_name)/client/thinclient.toml -thin -log_level DEBUG -probe --probe_count 3
 
 # client.toml dials container hostnames (gateway1, auth1, ...), so the full
-# client must join the compose network, not the host's. The network name is
-# upstream's compose_network_name, derived here in the shell: defining it as a
-# variable would be exported and override upstream's own.
+# client must join the compose network, not the host's.
 .PHONY: walletshield-probe-full
 walletshield-probe-full: $(net_dir)/walletshield.$(distro) $(net_dir)/running.stamp | $(cache_dir)
-	net="$$(printf '%s_%s_katzenpost-net' '$(net_name)' "$$(cat $(kp_docker_dir)/.base_port_seed | sha1sum | head -c 5)" | tr -d .)"; \
+	net="$$($(compose_network_sh))"; \
 	$(docker) run --network=$$net $(docker_args) $(mount_net_name) --rm katzenpost-$(distro)_base \
 		/$(net_name)/walletshield.$(distro) -config /$(net_name)/client/client.toml --listen_client :64333 -log_level DEBUG -probe --probe_count 3
 
@@ -211,6 +214,35 @@ clean: walletshield-stop
 # start the testnet in the background with the local customizations
 start: clone-katzenpost $(docker_compose_yml) custom-config custom-binaries
 	$(MAKE) -e -C $(katzenpost_dir)/docker $@
+
+# A network without storage replicas: upstream's wait requires two (fetch -r 2),
+# so this one runs the same readiness check with wait_min_replicas instead.
+# Mirrored from upstream's wait (v0.0.107), with its own deadline: upstream's
+# wait_seconds (5 epochs) is not visible here.
+ifneq ($(wait_min_replicas),)
+wait_min_replicas_seconds?=600
+.PHONY: wait
+wait: clone-katzenpost
+	$(MAKE) -e -C $(katzenpost_dir)/docker check-net-transport $(net_name)/running.stamp $(net_name)/client/thinclient-bridge.toml
+	@net="$$($(compose_network_sh))"; \
+	deadline=$$(( $$(date +%s) + $(wait_min_replicas_seconds) )); \
+	until left=$$(( deadline - $$(date +%s) )); [ $$left -gt 0 ] || exit 1; \
+		$(docker) run --network=$$net $(docker_args) $(mount_net_name) --rm katzenpost-$(distro)_base \
+		/$(net_name)/fetch.$(distro) -f /$(net_name)/client/thinclient-bridge.toml -r $(wait_min_replicas) --require-ready --ready-timeout $${left}s; do \
+		echo "wait: the client daemon is not accepting connections yet; retrying"; sleep 5; done
+endif
+
+# Stops the network and deletes its directory. The containers run as root, so
+# files they wrote (e.g. mixkeys/) are root's: a container deletes them.
+.PHONY: clean-network
+clean-network: stop
+	$(if $(filter-out /%,$(net_name)),,$(error net_name must be a relative name))
+	$(docker) run --rm -v $(kp_docker_dir):/w katzenpost-$(distro)_base rm -rf /w/$(net_name)
+
+# Makefiles are sources: the empty rules keep the pass-through `%` rule below
+# from trying to remake them through upstream.
+Makefile: ;
+networks/%.mk: ;
 
 # pass through all other targets to katzenpost/docker/Makefile
 %: clone-katzenpost
