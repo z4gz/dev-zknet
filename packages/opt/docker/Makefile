@@ -62,6 +62,16 @@ docker_args=--user ${docker_user} --volume $(kp_dir):/go/katzenpost --workdir /g
 	$(git_safe_dir) $(extra_docker_args)
 mount_net_name=-v $(kp_docker_dir)/$(net_name):/$(net_name)
 
+### network selection
+# network=<name> reads networks/<name>.mk after the defaults above, so a
+# network file overrides them (its own net_name included) and every target
+# sees the same network without repeating knobs: `make network=devnet start`.
+# Unset: the local network above. The command line still wins over both.
+network?=
+ifneq ($(network),)
+include networks/$(network).mk
+endif
+
 ### local
 # ldflags for our binaries: upstream's ldflags_body plus the compression flag
 # and the version. Not named ldflags, which would override upstream's (and its
