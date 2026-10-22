@@ -81,9 +81,16 @@ net_dir=$(kp_docker_dir)/$(net_name)
 mount_opt=-v $(shell readlink -f ..):/go/opt
 docker_run_sh=$(docker) run ${docker_args} $(mount_net_name) $(mount_opt) --rm katzenpost-$(distro)_base $(sh) -c
 
+# rpc_proxy's log level, passed as its -log_level flag; empty keeps the
+# plugin's default (DEBUG).
+rpc_proxy_log_level?=
+# true turns off the logging of every node and of kpclientd ([Logging] Disable).
+log_disable?=false
+
 # export variables to the environment for consumption by invoked Makefile(s)
 export
 
+# The rpc_proxy plugin for every service node; @node@ is the node's name.
 define SERVICENODE_PLUGINS
   [[ServiceNode.CBORPluginKaetzchen]]
     Capability = "rpc_proxy"
@@ -92,8 +99,9 @@ define SERVICENODE_PLUGINS
     MaxConcurrency = 1
     Disable = false
     [ServiceNode.CBORPluginKaetzchen.Config]
-      config = "/$(net_name)/servicenode1/rpc_proxy_config.toml"
-      log_dir = "/$(net_name)/servicenode1"
+      config = "/$(net_name)/@node@/rpc_proxy_config.toml"
+      log_dir = "/$(net_name)/@node@"$(if $(rpc_proxy_log_level),
+      log_level = "$(rpc_proxy_log_level)")
 endef
 
 .PHONY: help
@@ -111,17 +119,27 @@ custom-binaries: $(net_dir)/rpc_proxy.$(distro)
 
 .PHONY: custom-config
 custom-config:
-	@file="$(net_dir)/servicenode1/katzenpost.toml"; \
-	tmp="$$(mktemp)"; \
-	plugin="$$(mktemp)"; \
-	sed '/^# BEGIN SERVICENODE_PLUGINS$$/,/^# END SERVICENODE_PLUGINS$$/d' "$$file" > "$$tmp"; \
-	{ \
-		echo '# BEGIN SERVICENODE_PLUGINS'; \
-		printf '%s\n' "$$SERVICENODE_PLUGINS"; \
-		echo '# END SERVICENODE_PLUGINS'; \
-	} > "$$plugin"; \
-	sed "/^\[ServiceNode\]$$/r $$plugin" "$$tmp" > "$$file"; \
-	rm -f "$$tmp" "$$plugin"
+	@for dir in $(net_dir)/servicenode*/; do \
+		[ -d "$$dir" ] || continue; \
+		node="$$(basename "$$dir")"; \
+		file="$$dir/katzenpost.toml"; \
+		tmp="$$(mktemp)"; \
+		plugin="$$(mktemp)"; \
+		sed '/^# BEGIN SERVICENODE_PLUGINS$$/,/^# END SERVICENODE_PLUGINS$$/d' "$$file" > "$$tmp"; \
+		{ \
+			echo '# BEGIN SERVICENODE_PLUGINS'; \
+			printf '%s\n' "$$SERVICENODE_PLUGINS" | sed "s/@node@/$$node/g"; \
+			echo '# END SERVICENODE_PLUGINS'; \
+		} > "$$plugin"; \
+		sed "/^\[ServiceNode\]$$/r $$plugin" "$$tmp" > "$$file"; \
+		rm -f "$$tmp" "$$plugin"; \
+		cp $(opt_config_sources) "$$dir"; \
+	done
+	@for file in $(net_dir)/*/katzenpost.toml $(net_dir)/*/authority.toml $(net_dir)/client/client.toml; do \
+		if [ -f "$$file" ]; then \
+			sed -i '/^\[Logging\]$$/,/^\[/s/^\( *Disable = \).*/\1$(log_disable)/' "$$file" || exit 1; \
+		fi; \
+	done
 
 .PHONY: clone-katzenpost
 clone-katzenpost:
@@ -142,7 +160,6 @@ $(opt_go_sources) $(opt_config_sources): ;
 
 $(net_dir)/rpc_proxy.$(distro): $(katzenpost_dir)/docker/$(distro)_base.stamp $(opt_go_sources) $(opt_config_sources) | $(net_name) $(cache_dir)
 	$(docker_run_sh) 'cd /go/opt/server_plugins/cbor_plugins/rpc_proxy/cmd/rpc_proxy ; go build -trimpath -ldflags ${opt_ldflags} && mv rpc_proxy /$(net_name)/rpc_proxy.$(distro)'
-	cp ../server_plugins/cbor_plugins/rpc_proxy/rpc_proxy_config.toml $(net_dir)/servicenode1/
 
 # Holds the version the binaries were last built at, so a new commit rebuilds
 # walletshield (whose /_/health reports it) even when no source changed.
