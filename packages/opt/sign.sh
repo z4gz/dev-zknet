@@ -15,7 +15,7 @@
 #
 # The clients' key is libs/rs-core/asset-key.pub: one line, the base64 public
 # key. Sign the export of the commit checked out here: the signature names it
-# (`git describe`). Needs bash, coreutils, awk, git and minisign >= 0.12.
+# (`git describe`). Needs bash, coreutils, awk, git and minisign (0.11, 0.12).
 # Never prints either secret.
 set -euo pipefail
 
