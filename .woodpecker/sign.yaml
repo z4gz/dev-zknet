@@ -1,0 +1,25 @@
+# Sign the WalletShield export that `dist.yaml` left in dist/woodpecker/ for the
+# clients (packages/opt/sign.sh). Run it with `.woodpecker/run sign` right after
+# `.woodpecker/run dist`: it signs from the checkout dist built, and run supplies
+# the key. dist.yaml maps no secret, so it runs anywhere without one.
+# See .woodpecker/README.md.
+
+when:
+  - event: [push, manual, tag]
+
+steps:
+  sign-assets:
+    image: alpine:3.22
+    environment:
+      ZKNET_ASSET_SIGNING_KEY:
+        from_secret: zknet_asset_signing_key
+      ZKNET_ASSET_SIGNING_PASSWORD:
+        from_secret: zknet_asset_signing_password
+    commands:
+      - . "$CI_WORKSPACE/.woodpecker/lib.sh"
+      - apk add -q bash coreutils git minisign
+      # sign.sh names the build with git; the checkout may belong to another user
+      - git config --global --add safe.directory "$SRC"
+      - served=$CI_WORKSPACE/dist/woodpecker/walletshield/served
+      - '"$SRC/packages/opt/sign.sh" "$served"'
+      - chown "$(stat -c %u:%g "$CI_WORKSPACE")" "$served/checksums.txt.minisig"

@@ -8,6 +8,7 @@ docker-in-docker: each step's image is the toolchain.
 | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ci.yaml`   | The checks of `.github/workflows/ci.yml`: `nx format:check` and `nx run-many -t lint test build typecheck`                                                                                                                                                                                         |
 | `dist.yaml` | WalletShield for linux-amd64, linux-arm64, darwin-amd64, darwin-arm64 and windows-amd64 (the clients' download export, `served/`; the release rung's archive keeps a darwin-universal binary); the CLI for linux-amd64, linux-arm64, darwin-universal and windows-amd64; the Linux desktop bundles |
+| `sign.yaml` | Signs the clients' WalletShield export that `dist.yaml` left in `dist/woodpecker/` (`packages/opt/sign.sh`); the only pipeline that needs a secret                                                                                                                                                 |
 | `lib.sh`    | Step setup both pipelines source: pinned toolchains, caches, the checkout                                                                                                                                                                                                                          |
 | `run`       | The entry point: `woodpecker-cli exec` with the host cache directory mounted                                                                                                                                                                                                                       |
 
@@ -41,6 +42,44 @@ dist/woodpecker/
 A cold run (empty cache) takes about 7 minutes and a warm one about 2. The
 cache volume holds about 12 GB after `dist.yaml` and 19 GB once `ci.yaml` has
 added its own Cargo build.
+
+## Signing the clients' assets
+
+The clients install a network's WalletShield only if the build's
+`served/checksums.txt` carries a signature by the key in
+`libs/rs-core/asset-key.pub` (`zknet_core::auth`). Sign the export right after
+building it, on any machine that holds the secret key:
+
+```sh
+.woodpecker/run dist
+.woodpecker/run sign      # asks for the key's passphrase
+```
+
+`sign` signs from the checkout `dist` built and writes
+`dist/woodpecker/walletshield/served/checksums.txt.minisig`, which
+`apps/network-assets/assemble.sh` publishes beside the binaries. It needs
+`ZKNET_ASSET_KEY_FILE`, the path of the minisign secret key, in the environment
+or in `local.env`. `run` asks for the passphrase (or reads
+`ZKNET_ASSET_SIGNING_PASSWORD`), writes key and passphrase to a private secrets
+file for `woodpecker-cli exec --secrets-file`, and removes it on exit.
+
+`packages/opt/sign.sh` is the unit that does the work; it runs outside
+Woodpecker too, with the key in `ZKNET_ASSET_SIGNING_KEY` and its passphrase in
+`ZKNET_ASSET_SIGNING_PASSWORD`.
+
+### Secrets in pipelines
+
+A step never sees the host's environment on the docker backend; it gets a
+secret only through `from_secret`. And `woodpecker-cli exec` refuses a pipeline
+whose running steps map a secret it wasn't given (`secret "…" not found`),
+while steps whose `when` doesn't match need none. So:
+
+- a step maps a secret only if it runs exclusively when the secret is
+  supplied: in a pipeline of its own (`sign.yaml`), or behind a `when` that
+  matches only then (the tag-only `desktop-release` step of `dist.yaml`);
+- `run` passes secrets as a file (`ZKNET_WOODPECKER_SECRETS`, or the one it
+  writes for `sign`). Not `WOODPECKER_SECRETS`: its `name=value,...` form
+  mangles a value with a `,` or `"`.
 
 ## The cache directory
 
