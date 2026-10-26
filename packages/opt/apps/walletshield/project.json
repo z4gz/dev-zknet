@@ -14,11 +14,15 @@
         "optModule",
         "{workspaceRoot}/packages/opt/served.sh",
         "{workspaceRoot}/packages/opt/test_served.py",
+        "{workspaceRoot}/packages/opt/sign.sh",
+        "{workspaceRoot}/packages/opt/test_sign.py",
+        "{workspaceRoot}/libs/rs-core/asset-key.pub",
+        "{workspaceRoot}/libs/rs-core/src/auth.rs",
         "{workspaceRoot}/packages/opt/.goreleaser.yaml",
         "{workspaceRoot}/libs/rs-core/src/network.rs"
       ],
       "options": {
-        "commands": ["go test ./...", "python3 -B -m unittest discover -s ../.. -p test_served.py"],
+        "commands": ["go test ./...", "python3 -B -m unittest discover -s ../.. -p 'test_*.py'"],
         "cwd": "{projectRoot}",
         "parallel": false
       }
