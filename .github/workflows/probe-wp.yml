@@ -11,6 +11,7 @@ env:
   WOODPECKER_VERSION: v3.20.0
 jobs:
   wp-local:
+    if: false
     strategy:
       fail-fast: false
       matrix:
@@ -112,7 +113,6 @@ jobs:
           retention-days: 3
 
   wp-docker-linux:
-    if: false # answered by run 40758761041
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -126,14 +126,14 @@ jobs:
           gh release download "$WOODPECKER_VERSION" -R woodpecker-ci/woodpecker -p woodpecker-cli_linux_amd64.tar.gz -D "$RUNNER_TEMP/wp"
           tar -xzf "$RUNNER_TEMP/wp/woodpecker-cli_linux_amd64.tar.gz" -C "$RUNNER_TEMP/wp"
           echo "$RUNNER_TEMP/wp" >> "$GITHUB_PATH"
-      - name: .woodpecker/run dist (docker backend)
+      - name: .woodpecker/run ci (docker backend)
         env:
           ZKNET_WOODPECKER_CACHE: /mnt/zknet-woodpecker
         run: |
           sudo mkdir -p "$ZKNET_WOODPECKER_CACHE" && sudo chown "$(id -u):$(id -g)" "$ZKNET_WOODPECKER_CACHE"
           start=$(date +%s)
-          .woodpecker/run dist; rc=$?
-          echo "::notice title=wp-docker-linux dist::rc=$rc in $(( $(date +%s) - start ))s"
+          .woodpecker/run ci; rc=$?
+          echo "::notice title=wp-docker-linux ci::rc=$rc in $(( $(date +%s) - start ))s"
           exit $rc
       - if: always()
         run: |
