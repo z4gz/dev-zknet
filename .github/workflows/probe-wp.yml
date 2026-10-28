@@ -64,8 +64,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: macos-latest, args: "" }
-          - { os: macos-latest, args: "--target universal-apple-darwin", targets: "aarch64-apple-darwin x86_64-apple-darwin" }
           - { os: windows-latest, args: "" }
     runs-on: ${{ matrix.os }}
     defaults:
@@ -106,6 +104,7 @@ jobs:
           retention-days: 3
 
   wp-docker-linux:
+    if: false # answered by run 40758761041
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

@@ -11,7 +11,7 @@ steps:
       - echo "shell=$0 bash=$BASH_VERSION pwd=$(pwd) HOME=$HOME"
       - env | sort | cut -c1-160
       - command -v node pnpm cargo rustup rustc || true
-      - rustup show active-toolchain || echo "rustup: no toolchain under this HOME"
+      - 'rustup show active-toolchain || echo "rustup - no toolchain under this HOME"'
   desktop:
     image: bash
     depends_on: [env]
