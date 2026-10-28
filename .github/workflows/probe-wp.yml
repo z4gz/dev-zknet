@@ -48,7 +48,14 @@ jobs:
           echo "RUSTUP_HOME=$rh CARGO_HOME=$ch HOME=$HOME"
           sed -i.bak -e "s#@RUSTUP_HOME@#${rh//\\/\\\\\\\\}#" -e "s#@CARGO_HOME@#${ch//\\/\\\\\\\\}#" .probe/desktop-local.yaml
           cat .probe/desktop-local.yaml
+      - name: env pass-through (job env -> local step)
+        env:
+          WREL_X: passed
+          RUSTUP_HOME: ${{ runner.os == 'Windows' && 'C:\\Users\\runneradmin\\.rustup' || '/Users/runner/.rustup' }}
+          CARGO_HOME: ${{ runner.os == 'Windows' && 'C:\\Users\\runneradmin\\.cargo' || '/Users/runner/.cargo' }}
+        run: time woodpecker-cli exec --backend-engine local .probe/env-local.yaml
       - name: woodpecker-cli exec (local backend)
+        if: false
         run: |
           woodpecker-cli --version
           start=$(date +%s)
@@ -56,10 +63,11 @@ jobs:
           echo "::notice title=wp-local ${{ matrix.os }}::rc=$rc in $(( $(date +%s) - start ))s"
           exit $rc
       - name: Bundles
-        if: always()
+        if: false
         run: find target -path '*bundle*' -maxdepth 6 \( -name '*.dmg' -o -name '*.app' -o -name '*.exe' -o -name '*.msi' \) 2>/dev/null | head; find apps/client/src-tauri/target dist -path '*bundle*' -maxdepth 7 2>/dev/null | head -20
 
   native:
+    if: false
     strategy:
       fail-fast: false
       matrix:

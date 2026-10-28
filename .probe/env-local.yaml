@@ -1,0 +1,11 @@
+# Probe: which host environment reaches a local-backend step
+skip_clone: true
+when:
+  - event: manual
+steps:
+  env:
+    image: bash
+    commands:
+      - 'echo "WREL_X=${WREL_X:-unset} RUSTUP_HOME=${RUSTUP_HOME:-unset} CARGO_HOME=${CARGO_HOME:-unset} HOME=$HOME CI=$CI"'
+      - 'echo "tilde-user=$(eval echo ~$(id -un))"'
+      - "rustup show active-toolchain"
