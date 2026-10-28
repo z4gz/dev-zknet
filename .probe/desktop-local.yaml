@@ -1,0 +1,25 @@
+# Probe: the desktop dev build on Woodpecker's local backend (no docker).
+# `image` names the shell on the local backend. Generated paths are filled in
+# by the workflow (the local backend passes PATH but not the host environment).
+skip_clone: true
+when:
+  - event: manual
+steps:
+  env:
+    image: bash
+    commands:
+      - echo "shell=$0 bash=$BASH_VERSION pwd=$(pwd) HOME=$HOME"
+      - env | sort | cut -c1-160
+      - command -v node pnpm cargo rustup rustc || true
+      - rustup show active-toolchain || echo "rustup: no toolchain under this HOME"
+  desktop:
+    image: bash
+    depends_on: [env]
+    environment:
+      RUSTUP_HOME: "@RUSTUP_HOME@"
+      CARGO_HOME: "@CARGO_HOME@"
+      CI: "true"
+    commands:
+      - rustup show active-toolchain
+      - pnpm install --frozen-lockfile
+      - pnpm exec nx run @zknet/client:desktop-build:dev --args="--config ../../.probe/beta.conf.json"

@@ -1,0 +1,134 @@
+# Throwaway probe (branch probe/wp): can GHA's macOS/Windows runners run the
+# desktop build through Woodpecker's local backend, and can ubuntu run the
+# Linux dist pipeline on the docker backend? Native Nx builds are the baseline.
+name: probe-wp
+on:
+  push:
+    branches: [probe/wp]
+permissions:
+  contents: read
+env:
+  WOODPECKER_VERSION: v3.20.0
+jobs:
+  wp-local:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: rustup toolchain install && cargo --version
+      - name: Install woodpecker-cli
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          case "$RUNNER_OS-$RUNNER_ARCH" in
+            macOS-ARM64) a=woodpecker-cli_darwin_arm64.tar.gz ;;
+            macOS-X64) a=woodpecker-cli_darwin_amd64.tar.gz ;;
+            Windows-X64) a=woodpecker-cli_windows_amd64.zip ;;
+          esac
+          gh release view "$WOODPECKER_VERSION" -R woodpecker-ci/woodpecker --json assets --jq '.assets[].name' | grep cli
+          gh release download "$WOODPECKER_VERSION" -R woodpecker-ci/woodpecker -p "$a" -D "$RUNNER_TEMP/wp"
+          cd "$RUNNER_TEMP/wp" && { tar -xzf "$a" 2>/dev/null || unzip -q "$a"; } && ls -la
+          echo "$RUNNER_TEMP/wp" >> "$GITHUB_PATH"
+      - name: Fill host paths into the probe pipeline
+        run: |
+          rh=$(rustup show home); ch=${CARGO_HOME:-$HOME/.cargo}
+          echo "RUSTUP_HOME=$rh CARGO_HOME=$ch HOME=$HOME"
+          sed -i.bak -e "s#@RUSTUP_HOME@#${rh//\\/\\\\\\\\}#" -e "s#@CARGO_HOME@#${ch//\\/\\\\\\\\}#" .probe/desktop-local.yaml
+          cat .probe/desktop-local.yaml
+      - name: woodpecker-cli exec (local backend)
+        run: |
+          woodpecker-cli --version
+          start=$(date +%s)
+          woodpecker-cli exec --backend-engine local .probe/desktop-local.yaml; rc=$?
+          echo "::notice title=wp-local ${{ matrix.os }}::rc=$rc in $(( $(date +%s) - start ))s"
+          exit $rc
+      - name: Bundles
+        if: always()
+        run: find target -path '*bundle*' -maxdepth 6 \( -name '*.dmg' -o -name '*.app' -o -name '*.exe' -o -name '*.msi' \) 2>/dev/null | head; find apps/client/src-tauri/target dist -path '*bundle*' -maxdepth 7 2>/dev/null | head -20
+
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest, args: "" }
+          - { os: macos-latest, args: "--target universal-apple-darwin", targets: "aarch64-apple-darwin x86_64-apple-darwin" }
+          - { os: windows-latest, args: "" }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: rustup toolchain install && cargo --version && for t in ${{ matrix.targets }}; do rustup target add $t; done
+      - run: pnpm install --frozen-lockfile
+      - name: nx desktop-build:dev (version 0.1.0-beta.1)
+        run: |
+          start=$(date +%s)
+          pnpm exec nx run @zknet/client:desktop-build:dev --args="--config ../../.probe/beta.conf.json ${{ matrix.args }}"; rc=$?
+          echo "::notice title=native ${{ matrix.os }} ${{ matrix.args }}::rc=$rc in $(( $(date +%s) - start ))s"
+          exit $rc
+      - name: Bundles
+        if: always()
+        run: |
+          find . -path ./node_modules -prune -o -path '*/bundle/*' \( -name '*.dmg' -o -name '*.app' -o -name '*.exe' -o -name '*.msi' -o -name '*.tar.gz' -o -name '*.sig' \) -print 2>/dev/null | grep -v node_modules | head -20
+          for f in $(find . -path '*/bundle/*' \( -name '*.dmg' -o -name '*.exe' \) 2>/dev/null | grep -v node_modules); do ls -la "$f"; done
+          p=$(find . -path '*/bundle/macos/*.app/Contents/Info.plist' 2>/dev/null | head -1); [ -z "$p" ] || plutil -p "$p" | grep -E 'CFBundle(Short)?Version'
+          for f in $(find . -path '*/bundle/*' -name '*.dmg' 2>/dev/null | grep -v node_modules); do lipo -archs "$(dirname "$f")/../macos/"*.app/Contents/MacOS/* 2>/dev/null; done
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: desktop-${{ matrix.os }}-${{ strategy.job-index }}
+          path: |
+            **/bundle/dmg/*.dmg
+            **/bundle/nsis/*.exe
+          if-no-files-found: warn
+          retention-days: 3
+
+  wp-docker-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - run: df -h / /mnt; nproc; free -g
+      - name: Install woodpecker-cli
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$WOODPECKER_VERSION" -R woodpecker-ci/woodpecker -p woodpecker-cli_linux_amd64.tar.gz -D "$RUNNER_TEMP/wp"
+          tar -xzf "$RUNNER_TEMP/wp/woodpecker-cli_linux_amd64.tar.gz" -C "$RUNNER_TEMP/wp"
+          echo "$RUNNER_TEMP/wp" >> "$GITHUB_PATH"
+      - name: .woodpecker/run dist (docker backend)
+        env:
+          ZKNET_WOODPECKER_CACHE: /mnt/zknet-woodpecker
+        run: |
+          sudo mkdir -p "$ZKNET_WOODPECKER_CACHE" && sudo chown "$(id -u):$(id -g)" "$ZKNET_WOODPECKER_CACHE"
+          start=$(date +%s)
+          .woodpecker/run dist; rc=$?
+          echo "::notice title=wp-docker-linux dist::rc=$rc in $(( $(date +%s) - start ))s"
+          exit $rc
+      - if: always()
+        run: |
+          df -h / /mnt; sudo du -sh /mnt/zknet-woodpecker 2>/dev/null
+          find dist/woodpecker -type f | head -40
