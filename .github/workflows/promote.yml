@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "The release to promote, e.g. desktop@0.1.0"
+        description: "The release to promote, e.g. client@0.1.0"
         required: true
 
 permissions:

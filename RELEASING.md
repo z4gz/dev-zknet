@@ -20,20 +20,20 @@ new repository (`OWNER/REPO`).
 
 ## Components and tags
 
-A release is one component's tag: **`<id>@<semver>`**, e.g. `desktop@0.2.0-beta.1`.
+A release is one component's tag: **`<id>@<semver>`**, e.g. `client@0.2.0-beta.1`.
 The tag is the version's source of truth: the manifests commit `0.0.0` and
 the build stamps the tag's version. A rebuild is a new version; a tag never
 carries `+build` metadata. `release/components.json` is the one place a
 component's tag prefix lives, so renaming one is a one-line change there.
 
-| tag prefix     | Nx project         | built on                                                      | release assets                                                                                                               |
-| -------------- | ------------------ | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `desktop`      | `@zknet/client`    | Linux (Woodpecker), macOS universal, Windows (native)         | `.deb`, `.rpm`, `.AppImage`, `.dmg`, NSIS `-setup.exe`; with a signing key, the updater bundles, their `.sig`, `latest.json` |
-| `cli`          | `zknet_client_cli` | Linux + Windows (Woodpecker, cross), macOS universal (native) | `zknet_client_cli_<version>_<platform>[.exe]` for linux-amd64, linux-arm64, windows-amd64, darwin-universal                  |
-| `walletshield` | `walletshield`     | Linux + Windows (Woodpecker, cross), macOS (native)           | goreleaser's archives: linux amd64/arm64, windows amd64, darwin universal                                                    |
+| tag prefix         | Nx project         | built on                                                      | release assets                                                                                                               |
+| ------------------ | ------------------ | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `client`           | `client`           | Linux (Woodpecker), macOS universal, Windows (native)         | `.deb`, `.rpm`, `.AppImage`, `.dmg`, NSIS `-setup.exe`; with a signing key, the updater bundles, their `.sig`, `latest.json` |
+| `client-cli`       | `client-cli`       | Linux + Windows (Woodpecker, cross), macOS universal (native) | the `zknet` binary: `zknet_<version>_<platform>[.exe]` for linux-amd64, linux-arm64, windows-amd64, darwin-universal         |
+| `app-walletshield` | `app-walletshield` | Linux + Windows (Woodpecker, cross), macOS (native)           | goreleaser's archives: linux amd64/arm64, windows amd64, darwin universal                                                    |
 
 Every release also carries `checksums.txt` (sha256 of every asset). Both the
-desktop and the CLI build in `zknet_core` (`libs/client-core`), so its commits
+desktop and the CLI build in `zknet-client-core` (`libs/client-core`, Nx `client-core`), so its commits
 appear in both their notes. The darwin builds run natively on macOS, with
 Xcode's SDK, never with an SDK inside a Linux image.
 
@@ -138,22 +138,22 @@ credential, and GitHub provides it.
    same component):
 
    ```sh
-   # the notes a desktop@0.2.0-beta.1 release would get; needs git-cliff 2.14
-   node release/release.mjs notes desktop@0.2.0-beta.1
+   # the notes a client@0.2.0-beta.1 release would get; needs git-cliff 2.14
+   node release/release.mjs notes client@0.2.0-beta.1
    ```
 
 2. **Optional, a dry run:** build every platform without publishing; the
    outputs attach to the run.
 
    ```sh
-   gh workflow run release.yml -R OWNER/REPO -f tag=desktop@0.2.0-beta.1
+   gh workflow run release.yml -R OWNER/REPO -f tag=client@0.2.0-beta.1
    ```
 
 3. **Tag and push**, the one tag by name (never `--tags`):
 
    ```sh
-   git tag desktop@0.2.0-beta.1
-   git push origin desktop@0.2.0-beta.1
+   git tag client@0.2.0-beta.1
+   git push origin client@0.2.0-beta.1
    ```
 
    `release.yml` creates a draft pre-release with the notes, builds on Linux,
@@ -167,7 +167,7 @@ credential, and GitHub provides it.
 5. **Promote it** when it is good:
 
    ```sh
-   gh workflow run promote.yml -R OWNER/REPO -f tag=desktop@0.2.0-beta.1
+   gh workflow run promote.yml -R OWNER/REPO -f tag=client@0.2.0-beta.1
    ```
 
    It takes the release out of pre-release, still not latest. No release is

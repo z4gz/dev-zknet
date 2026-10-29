@@ -2,7 +2,7 @@
 # Sign a WalletShield export for the clients: write SERVED/checksums.txt.minisig
 # over SERVED/checksums.txt (the build's binaries and their sha256, from
 # served.sh), then verify it against the clients' key. The clients install a
-# binary only if this signature and its hash check out (zknet_core::auth).
+# binary only if this signature and its hash check out (zknet_client_core::auth).
 #
 #   sign.sh [SERVED]
 #
