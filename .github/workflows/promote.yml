@@ -1,15 +1,25 @@
-# Promote a component's pre-release (release.yml) to a release: the manual
-# step that moves an app's users to it. No release is ever GitHub's "latest":
-# the desktop updater follows the app's own manifest, which this step will
-# publish once its location is decided. See RELEASING.md.
+# Promote a component's release (release.yml) to the version its users get:
+# release/promote, the same command a host runs. For the desktop client it
+# publishes the release's latest.json to updates.zknet.io/client/<channel>/;
+# promoting to stable also takes the release out of pre-release (never
+# latest). See RELEASING.md.
 name: promote
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "The release to promote, e.g. client@0.1.0"
+        description: "The release to promote, e.g. client@0.2.0"
         required: true
+      channel:
+        description: "The channel"
+        type: choice
+        options: [stable, beta]
+        default: stable
+      dry_run:
+        description: "Check everything, write nothing"
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -17,16 +27,18 @@ permissions:
 jobs:
   promote:
     runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
-      TAG: ${{ inputs.tag }}
     steps:
-      - name: The release, out of pre-release and never latest
-        run: |
-          gh release view "$TAG" --json isDraft,isPrerelease --jq 'if .isDraft then error("still a draft: its build has not finished") else . end'
-          gh release edit "$TAG" --prerelease=false --latest=false
-      - name: The app's update manifest
-        run: |
-          echo "publish: not configured yet (the app-specific update manifest's location is being designed)"
-          echo "the release's own manifest: $GITHUB_SERVER_URL/$GH_REPO/releases/download/$(jq -rn --arg t "$TAG" '$t|@uri')/latest.json"
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          CHANNEL: ${{ inputs.channel }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+        run: release/promote "$TAG" --channel "$CHANNEL" $([ "$DRY_RUN" = true ] && echo --dry-run)

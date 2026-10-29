@@ -1,0 +1,224 @@
+#!/usr/bin/env node
+// Promote a component's release to the version its users get. From a host or
+// from .github/workflows/promote.yml, with the same credentials. See RELEASING.md.
+//
+//   release/promote <id>@<semver> [--channel stable|beta] [--dry-run] [--repo OWNER/REPO]
+//
+// For a component with an update manifest (release/components.json
+// "manifest": the desktop client), it publishes the release's latest.json as
+// updates.zknet.io/<id>/<channel>/latest.json, in the R2 bucket that serves it:
+// - it refuses a version that is not newer than the channel's (the updater
+//   never downgrades);
+// - promoting stable also writes beta when beta is older (beta ⊇ stable);
+// - every platform URL in the manifest must answer 200.
+// Promoting to stable then takes the GitHub release out of pre-release (never
+// latest). A component without a manifest only gets that release flag.
+//
+// Credentials: gh's (GH_TOKEN, or `gh auth login`) for the release; for the
+// manifest, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY (an R2 API token for
+// the bucket) and R2_ACCOUNT_ID and R2_BUCKET. --dry-run makes every check and
+// writes nothing; without R2 credentials it reads the channels from their
+// public URLs.
+import { execFileSync } from "node:child_process";
+import { createHash, createHmac } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const PUBLIC_BASE = "https://updates.zknet.io";
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const components = JSON.parse(readFileSync(join(root, "release/components.json"), "utf8"));
+
+function die(message) {
+  console.error(`error: ${message}`);
+  process.exit(1);
+}
+
+function line(kind, what, result = "") {
+  console.log(`${kind.padEnd(9)} ${what}${result ? `  ${result}` : ""}`);
+}
+
+// --- arguments -----------------------------------------------------------------
+
+const args = process.argv.slice(2);
+const opt = (name) => {
+  const i = args.indexOf(name);
+  if (i < 0) return undefined;
+  const value = args[i + 1];
+  args.splice(i, 2);
+  return value;
+};
+const flag = (name) => {
+  const i = args.indexOf(name);
+  if (i >= 0) args.splice(i, 1);
+  return i >= 0;
+};
+const channel = opt("--channel") ?? "stable";
+const repo = opt("--repo") ?? process.env.GH_REPO ?? process.env.GITHUB_REPOSITORY;
+const dryRun = flag("--dry-run");
+const [tag] = args;
+if (!tag || args.length !== 1) die("usage: release/promote <id>@<semver> [--channel stable|beta] [--dry-run] [--repo OWNER/REPO]");
+if (!["stable", "beta"].includes(channel)) die(`unknown channel ${channel} (stable|beta)`);
+if (!repo) die("which repository? pass --repo OWNER/REPO, or set GH_REPO");
+
+const parsed = JSON.parse(execFileSync("node", [join(root, "release/release.mjs"), "parse", tag], { encoding: "utf8" }));
+const { id, version } = parsed;
+const component = components[id];
+
+// --- semver precedence (2.0.0 §11; no build metadata) ---------------------------
+
+function compare(a, b) {
+  const split = (v) => {
+    const [core, pre] = v.split(/-(.*)/s);
+    return { core: core.split(".").map(Number), pre: pre === undefined ? [] : pre.split(".") };
+  };
+  const x = split(a);
+  const y = split(b);
+  for (let i = 0; i < 3; i++) if (x.core[i] !== y.core[i]) return x.core[i] - y.core[i];
+  if (!x.pre.length || !y.pre.length) return y.pre.length - x.pre.length;
+  for (let i = 0; i < Math.max(x.pre.length, y.pre.length); i++) {
+    const p = x.pre[i];
+    const q = y.pre[i];
+    if (p === undefined) return -1;
+    if (q === undefined) return 1;
+    const pn = /^\d+$/.test(p);
+    const qn = /^\d+$/.test(q);
+    if (pn && qn && Number(p) !== Number(q)) return Number(p) - Number(q);
+    if (pn !== qn) return pn ? -1 : 1;
+    if (!pn && p !== q) return p < q ? -1 : 1;
+  }
+  return 0;
+}
+
+// --- R2 through the S3 API (AWS Signature Version 4, region "auto") -------------
+
+const r2 = (() => {
+  const { R2_ACCESS_KEY_ID: key, R2_SECRET_ACCESS_KEY: secret, R2_ACCOUNT_ID: account, R2_BUCKET: bucket } = process.env;
+  if (!key || !secret || !account || !bucket) return undefined;
+  return { key, secret, bucket, host: `${account}.r2.cloudflarestorage.com` };
+})();
+
+const sha256 = (data) => createHash("sha256").update(data).digest("hex");
+const hmac = (k, data) => createHmac("sha256", k).update(data).digest();
+
+// the Authorization header of an S3 request; headers must include host,
+// x-amz-date and x-amz-content-sha256
+export function signV4({ method, path, headers, accessKey, secretKey, region }) {
+  const lower = Object.fromEntries(Object.entries(headers).map(([k, v]) => [k.toLowerCase(), String(v).trim()]));
+  const names = Object.keys(lower).sort();
+  const canonical = [
+    method,
+    path,
+    "", // no query string
+    ...names.map((h) => `${h}:${lower[h]}`),
+    "",
+    names.join(";"),
+    lower["x-amz-content-sha256"],
+  ].join("\n");
+  const now = lower["x-amz-date"];
+  const scope = `${now.slice(0, 8)}/${region}/s3/aws4_request`;
+  const toSign = ["AWS4-HMAC-SHA256", now, scope, sha256(canonical)].join("\n");
+  let k = hmac(`AWS4${secretKey}`, now.slice(0, 8));
+  for (const part of [region, "s3", "aws4_request"]) k = hmac(k, part);
+  const signature = createHmac("sha256", k).update(toSign).digest("hex");
+  return `AWS4-HMAC-SHA256 Credential=${accessKey}/${scope}, SignedHeaders=${names.join(";")}, Signature=${signature}`;
+}
+
+async function s3(method, objectKey, body = "", extra = {}) {
+  const path = `/${r2.bucket}/${objectKey.split("/").map(encodeURIComponent).join("/")}`;
+  const headers = {
+    host: r2.host,
+    "x-amz-content-sha256": sha256(body),
+    "x-amz-date": new Date().toISOString().replace(/[:-]|\.\d{3}/g, ""),
+    ...extra,
+  };
+  const authorization = signV4({ method, path, headers, accessKey: r2.key, secretKey: r2.secret, region: "auto" });
+  const { host: _host, ...sent } = headers;
+  return fetch(`https://${r2.host}${path}`, { method, body: method === "PUT" ? body : undefined, headers: { ...sent, authorization } });
+}
+
+// the channel's current manifest version, or undefined when it has none
+async function current(ch) {
+  const objectKey = `${id}/${ch}/latest.json`;
+  let res;
+  try {
+    res = r2 ? await s3("GET", objectKey) : await fetch(`${PUBLIC_BASE}/${objectKey}`);
+  } catch (e) {
+    if (dryRun) {
+      line("read", `${ch}: ${PUBLIC_BASE}/${objectKey}`, `unreachable (${e.cause?.code ?? e.message}); taken as empty`);
+      return undefined;
+    }
+    throw e;
+  }
+  if (res.status === 404) return undefined;
+  if (!res.ok) die(`reading ${objectKey}: HTTP ${res.status} ${(await res.text()).slice(0, 200)}`);
+  return JSON.parse(await res.text()).version;
+}
+
+// --- the release -----------------------------------------------------------------
+
+const gh = (...a) => execFileSync("gh", [...a, "-R", repo], { encoding: "utf8" });
+let release;
+try {
+  release = JSON.parse(gh("release", "view", tag, "--json", "isDraft,isPrerelease,publishedAt,assets"));
+} catch {
+  die(`no release ${tag} in ${repo}`);
+}
+if (release.isDraft) die(`${tag} is still a draft: its build has not finished`);
+line("release", tag, `(${release.isPrerelease ? "pre-release" : "release"}, published ${release.publishedAt.replace("T", " ").replace(/:\d\dZ$/, " UTC")})`);
+
+const puts = [];
+if (component.manifest) {
+  if (!release.assets.some((a) => a.name === "latest.json")) die(`${tag} has no latest.json: was it built without the updater signing key?`);
+  const manifestText = gh("release", "download", tag, "--pattern", "latest.json", "--output", "-");
+  const manifest = JSON.parse(manifestText);
+  const platforms = Object.entries(manifest.platforms);
+  const signed = platforms.filter(([, p]) => p.signature).length;
+  line("manifest", "latest.json", `version ${manifest.version} · ${platforms.length} platforms · ${signed} signatures`);
+  if (manifest.version !== version) die(`latest.json says ${manifest.version}, the tag ${version}`);
+  line("check", "tag version == manifest version", "ok");
+
+  const urls = [...new Set(platforms.map(([, p]) => p.url))];
+  const failed = [];
+  for (const url of urls) {
+    const res = await fetch(url, { method: "HEAD", redirect: "follow" });
+    if (res.status !== 200) failed.push(`${res.status} ${url}`);
+  }
+  line("check", "every platform url → 200", failed.length ? `FAIL\n${failed.join("\n")}` : `ok (${urls.length}/${urls.length})`);
+  if (failed.length) die("a platform url does not resolve");
+
+  const was = await current(channel);
+  if (was !== undefined && compare(version, was) <= 0) {
+    line("check", `${version} > ${channel} ${was}`, "FAIL");
+    die(`${tag} is not newer than ${channel} (${was}); the updater never downgrades.\n       Roll back by releasing a fix as a new version.`);
+  }
+  line("check", `${version} > ${channel} ${was ?? "(none)"}`, "ok");
+  puts.push({ ch: channel, was });
+  if (channel === "stable") {
+    const beta = await current("beta");
+    if (beta === undefined || compare(beta, version) < 0) puts.push({ ch: "beta", was: beta, why: "(beta ⊇ stable)" });
+  }
+  for (const { ch, was: before, why } of puts) {
+    const objectKey = `${id}/${ch}/latest.json`;
+    if (!dryRun) {
+      if (!r2) die("writing the manifest needs R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ACCOUNT_ID and R2_BUCKET");
+      const res = await s3("PUT", objectKey, manifestText, {
+        "content-type": "application/json",
+        "cache-control": "public, max-age=60",
+      });
+      if (!res.ok) die(`writing ${objectKey}: HTTP ${res.status} ${(await res.text()).slice(0, 200)}`);
+    }
+    line(dryRun ? "would put" : "put", `updates.zknet.io/${objectKey}`, `${before ?? "(none)"} → ${version}${why ? `   ${why}` : ""}`);
+  }
+}
+
+if (channel === "stable") {
+  if (!dryRun) gh("release", "edit", tag, "--prerelease=false", "--latest=false");
+  line(dryRun ? "would gh" : "gh", `release edit ${tag} --prerelease=false --latest=false`);
+}
+line(
+  dryRun ? "dry run" : "done",
+  component.manifest
+    ? `installed \`${channel}\` clients ${dryRun ? "would see" : "see"} ${version} on their next check`
+    : `${tag} is ${dryRun ? "ready to be" : ""} released`,
+);
