@@ -47,7 +47,7 @@ added its own Cargo build.
 
 The clients install a network's WalletShield only if the build's
 `served/checksums.txt` carries a signature by the key in
-`libs/rs-core/asset-key.pub` (`zknet_core::auth`). Sign the export right after
+`libs/client-core/asset-key.pub` (`zknet_core::auth`). Sign the export right after
 building it, on any machine that holds the secret key:
 
 ```sh

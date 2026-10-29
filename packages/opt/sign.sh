@@ -13,7 +13,7 @@
 #   ZKNET_ASSET_SIGNING_KEY       the minisign secret key file's contents (both lines)
 #   ZKNET_ASSET_SIGNING_PASSWORD  its passphrase (empty for a key made with -W)
 #
-# The clients' key is libs/rs-core/asset-key.pub: one line, the base64 public
+# The clients' key is libs/client-core/asset-key.pub: one line, the base64 public
 # key. Sign the export of the commit checked out here: the signature names it
 # (`git describe`). Needs bash, coreutils, awk, git and minisign (0.11, 0.12).
 # Never prints either secret.
@@ -22,7 +22,7 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 workspace=$(cd "$here/../.." && pwd)
 served=${1:-$workspace/dist/woodpecker/walletshield/served}
-public_key_file=$workspace/libs/rs-core/asset-key.pub
+public_key_file=$workspace/libs/client-core/asset-key.pub
 
 die() {
   echo "sign: $*" >&2

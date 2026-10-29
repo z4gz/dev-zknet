@@ -9,7 +9,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 WORKSPACE = HERE.parents[1]
 SIGN_SH = HERE / 'sign.sh'
-ASSET_KEY = WORKSPACE / 'libs' / 'rs-core' / 'asset-key.pub'
+ASSET_KEY = WORKSPACE / 'libs' / 'client-core' / 'asset-key.pub'
 BINARIES = ['walletshield-linux-x64', 'walletshield-macos-arm64']
 PASSWORD = 's3cret-PASS'
 
@@ -32,9 +32,9 @@ class SignTest(unittest.TestCase):
         self.ws = self.tmp / 'ws'
         (self.ws / 'packages' / 'opt').mkdir(parents=True)
         shutil.copy(SIGN_SH, self.ws / 'packages' / 'opt' / 'sign.sh')
-        (self.ws / 'libs' / 'rs-core').mkdir(parents=True)
+        (self.ws / 'libs' / 'client-core').mkdir(parents=True)
         self.public, self.secret = keypair(self.tmp, 'clients', PASSWORD)
-        (self.ws / 'libs' / 'rs-core' / 'asset-key.pub').write_text(self.public + '\n')
+        (self.ws / 'libs' / 'client-core' / 'asset-key.pub').write_text(self.public + '\n')
         git = ['git', '-C', self.ws, '-c', 'user.name=t', '-c', 'user.email=t@t']
         subprocess.run([*git, 'init', '-q'], check=True)
         subprocess.run([*git, 'add', '.'], check=True)
@@ -69,7 +69,7 @@ class SignTest(unittest.TestCase):
         lines = result.stdout.splitlines()
         self.assertEqual(lines[0], 'sign: checksums.txt: 2 binaries match their hashes')
         self.assertRegex(lines[1], r'^sign: signed for build v1\.2\.3 \(commit [0-9a-f]+\) with key [0-9A-F]{16}$')
-        self.assertEqual(lines[2], 'sign: verified against libs/rs-core/asset-key.pub')
+        self.assertEqual(lines[2], 'sign: verified against libs/client-core/asset-key.pub')
         verified = subprocess.run(['minisign', '-V', '-P', self.public, '-m', self.served / 'checksums.txt'],
                                   capture_output=True, text=True)
         self.assertEqual(verified.returncode, 0, verified.stderr)
@@ -92,7 +92,7 @@ class SignTest(unittest.TestCase):
 
     def test_an_unencrypted_key_needs_no_passphrase(self):
         public, secret = keypair(self.tmp, 'plain', None)
-        (self.ws / 'libs' / 'rs-core' / 'asset-key.pub').write_text(public + '\n')
+        (self.ws / 'libs' / 'client-core' / 'asset-key.pub').write_text(public + '\n')
         result = self.sign(key=secret, password=None)
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -130,8 +130,8 @@ class AssetKeyTest(unittest.TestCase):
         lines = ASSET_KEY.read_text().splitlines()
         self.assertEqual(len(lines), 1)
         self.assertRegex(lines[0], r'^RW[A-Za-z0-9+/]{54}$')
-        self.assertIn('include_str!("../asset-key.pub")', (WORKSPACE / 'libs/rs-core/src/auth.rs').read_text())
-        self.assertIn('libs/rs-core/asset-key.pub', SIGN_SH.read_text())
+        self.assertIn('include_str!("../asset-key.pub")', (WORKSPACE / 'libs/client-core/src/auth.rs').read_text())
+        self.assertIn('libs/client-core/asset-key.pub', SIGN_SH.read_text())
 
 
 if __name__ == '__main__':
