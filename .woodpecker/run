@@ -13,6 +13,13 @@
 #
 # `sign` asks for the key's passphrase (or reads ZKNET_ASSET_SIGNING_PASSWORD)
 # and hands both to the pipeline in a private secrets file, removed on exit.
+#
+# Build settings, from the environment, reach every step through
+# .woodpecker/.run.env (git-ignored, removed on exit), since a docker-backend
+# step never sees the host's environment (lib.sh sources it):
+#   ZKNET_DIST_PLATFORMS      dist: the OSes to build for (default "linux windows darwin")
+#   ZKNET_UPDATER_PUBKEY      dist, a release: the desktop updater's public key
+#   ZKNET_UPDATER_ENDPOINT    dist, a release: the desktop updater's manifest URL
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -77,6 +84,15 @@ if [ "$name" = sign ]; then
 elif [ -n "$secrets" ]; then
   secrets_flags="--secrets-file $secrets"
 fi
+
+# the build settings, as shell assignments for lib.sh
+run_env=$here/.run.env
+for v in ZKNET_DIST_PLATFORMS ZKNET_UPDATER_PUBKEY ZKNET_UPDATER_ENDPOINT; do
+  eval "val=\${$v-}"
+  # shellcheck disable=SC2154 # val is set by the eval
+  [ -z "$val" ] || printf "%s='%s'\n" "$v" "$(printf '%s' "$val" | sed "s/'/'\\\\''/g")"
+done >"$run_env"
+trap 'rm -f "$run_env" ${run_secrets:+"$run_secrets"}' EXIT INT TERM
 
 echo "run: cache $cache" >&2
 cd "$here/.."
