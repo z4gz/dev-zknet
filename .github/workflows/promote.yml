@@ -1,6 +1,6 @@
 # Promote a component's release (release.yml) to the version its users get:
 # release/promote, the same command a host runs. For the desktop client it
-# publishes the release's latest.json to updates.zknet.io/client/<channel>/;
+# publishes the release's latest.json to dist.zknet.io/updates/client/<channel>/;
 # promoting to stable also takes the release out of pre-release (never
 # latest). See RELEASING.md.
 name: promote

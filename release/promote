@@ -6,7 +6,8 @@
 //
 // For a component with an update manifest (release/components.json
 // "manifest": the desktop client), it publishes the release's latest.json as
-// updates.zknet.io/<id>/<channel>/latest.json, in the R2 bucket that serves it:
+// dist.zknet.io/updates/<id>/<channel>/latest.json: it writes the R2 bucket's
+// <id>/<channel>/latest.json, which a Pages Function serves there:
 // - it refuses a version that is not newer than the channel's (the updater
 //   never downgrades);
 // - promoting stable also writes beta when beta is older (beta ⊇ stable);
@@ -25,7 +26,8 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const PUBLIC_BASE = "https://updates.zknet.io";
+const PUBLIC_BASE = "https://dist.zknet.io/updates";
+const PUBLIC_SHOWN = PUBLIC_BASE.replace(/^https:\/\//, "");
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const components = JSON.parse(readFileSync(join(root, "release/components.json"), "utf8"));
 
@@ -208,7 +210,7 @@ if (component.manifest) {
       });
       if (!res.ok) die(`writing ${objectKey}: HTTP ${res.status} ${(await res.text()).slice(0, 200)}`);
     }
-    line(dryRun ? "would put" : "put", `updates.zknet.io/${objectKey}`, `${before ?? "(none)"} → ${version}${why ? `   ${why}` : ""}`);
+    line(dryRun ? "would put" : "put", `${PUBLIC_SHOWN}/${objectKey}`, `${before ?? "(none)"} → ${version}${why ? `   ${why}` : ""}`);
   }
 }
 
