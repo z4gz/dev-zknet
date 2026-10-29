@@ -6,7 +6,7 @@
 #
 #   sign.sh [SERVED]
 #
-#   SERVED   the export of `walletshield:dist`
+#   SERVED   the export of `app-walletshield:dist`
 #            (default: dist/woodpecker/walletshield/served, where `.woodpecker/run dist` puts it)
 #
 # environment:

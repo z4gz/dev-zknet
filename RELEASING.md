@@ -178,7 +178,7 @@ credential, and GitHub provides it.
 ## What the desktop updater reads
 
 The desktop checks the URL in `ZKNET_UPDATER_ENDPOINT`. Its release build
-(`@zknet/client:desktop-build:release`) merges that URL, the tag's version and
+(`client:desktop-build:release`) merges that URL, the tag's version and
 `ZKNET_UPDATER_PUBKEY` into `tauri.conf.json`, through a configuration file
 `release/release.mjs tauri-config` writes. Each desktop release carries its own `latest.json`:
 its version, and per platform (`darwin-aarch64` and `darwin-x86_64` share the
